@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Post } from '@nestjs/common';
-@Controller('product')
+@Controller('products')
 export class AppController {
   @Get()
   list() { return { service: 'product-service', message: 'Product catalog, SKU, categories, search and pagination.', items: [] }; }

@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { AppController } from './app.controller';
+import { GatewayController } from './gateway.controller';
 import { HealthController } from './health.controller';
 
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true })],
-  controllers: [AppController, HealthController],
+  controllers: [GatewayController, HealthController],
 })
 export class AppModule {}
