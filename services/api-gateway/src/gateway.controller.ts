@@ -4,6 +4,7 @@ const serviceMap: Record<string, string> = {
   auth: 'http://auth-service:3001/api',
   products: 'http://product-service:3002/api',
   product: 'http://product-service:3002/api',
+  categories: 'http://product-service:3002/api',
   inventory: 'http://inventory-service:3003/api',
   transactions: 'http://transaction-service:3004/api',
   transaction: 'http://transaction-service:3004/api',
@@ -24,7 +25,8 @@ export class GatewayController {
   @All('*')
   async proxy(@Req() req: any, @Res() res: any) {
     const original = req.originalUrl.replace(/^\/api/, '') || '/';
-    const [, first] = original.split('/');
+    const pathOnly = original.split('?')[0];
+    const [, first] = pathOnly.split('/');
     const base = serviceMap[first];
     if (!base) throw new HttpException({ message: 'No route for service', path: original }, 404);
 
