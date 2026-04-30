@@ -1,0 +1,4 @@
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+CREATE TABLE IF NOT EXISTS suppliers (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), code VARCHAR(50) UNIQUE NOT NULL, name VARCHAR(255) NOT NULL, contact_name VARCHAR(255), phone VARCHAR(50), email VARCHAR(255), address TEXT);
+CREATE TABLE IF NOT EXISTS stock_transactions (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), type VARCHAR(20) NOT NULL, code VARCHAR(50) UNIQUE NOT NULL, warehouse_id UUID NOT NULL, supplier_id UUID NULL, status VARCHAR(30) NOT NULL DEFAULT 'DRAFT', created_by UUID, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+CREATE TABLE IF NOT EXISTS stock_transaction_items (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), transaction_id UUID REFERENCES stock_transactions(id), product_id UUID NOT NULL, quantity NUMERIC(14,2) NOT NULL, unit_price NUMERIC(14,2) DEFAULT 0);

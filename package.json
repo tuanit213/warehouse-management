@@ -1,0 +1,15 @@
+{
+  "name": "warehouse-management-system",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "compose:up": "docker compose up --build",
+    "compose:down": "docker compose down",
+    "compose:logs": "docker compose logs -f --tail=200",
+    "check": "docker compose config"
+  },
+  "workspaces": [
+    "frontend",
+    "services/*"
+  ]
+}

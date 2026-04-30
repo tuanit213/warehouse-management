@@ -1,0 +1,33 @@
+{
+  "name": "@wms/auth-service",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "nest start",
+    "start:dev": "nest start --watch",
+    "build": "nest build"
+  },
+  "dependencies": {
+    "@nestjs/common": "^10.4.15",
+    "@nestjs/core": "^10.4.15",
+    "@nestjs/platform-express": "^10.4.15",
+    "@nestjs/config": "^3.3.0",
+    "@nestjs/jwt": "^10.2.0",
+    "@nestjs/passport": "^10.0.3",
+    "rxjs": "^7.8.1",
+    "reflect-metadata": "^0.2.2",
+    "pg": "^8.13.1",
+    "amqplib": "^0.10.5",
+    "ioredis": "^5.4.1",
+    "class-validator": "^0.14.1",
+    "class-transformer": "^0.5.1"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^10.4.8",
+    "@nestjs/schematics": "^10.2.3",
+    "@nestjs/testing": "^10.4.15",
+    "@types/node": "latest",
+    "typescript": "^5.7.2",
+    "ts-node": "^10.9.2"
+  }
+}

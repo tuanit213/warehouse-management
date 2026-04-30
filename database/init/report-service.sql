@@ -1,0 +1,2 @@
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+CREATE TABLE IF NOT EXISTS report_snapshots (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), snapshot_type VARCHAR(50) NOT NULL, payload JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());

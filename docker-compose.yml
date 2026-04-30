@@ -1,0 +1,284 @@
+services:
+  frontend:
+    build:
+      context: ./frontend
+    container_name: wms-frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3000/api
+    ports:
+      - "3006:3000"
+    depends_on:
+      - api-gateway
+    networks:
+      - wms-network
+
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+    container_name: wms-api-gateway
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3000
+      JWT_SECRET: ${JWT_SECRET:-change-me-super-secret}
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672
+    ports:
+      - "3000:3000"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - wms-network
+
+  auth-service:
+    build:
+      context: ./services/auth-service
+    container_name: wms-auth-service
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3001
+      JWT_SECRET: ${JWT_SECRET:-change-me-super-secret}
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@auth-service-db:5432/${AUTH_DB:-auth_db}
+    ports:
+      - "3001:3001"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      auth-service-db:
+        condition: service_healthy
+    networks:
+      - wms-network
+
+  auth-service-db:
+    image: postgres:16-alpine
+    container_name: wms-auth-service-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${AUTH_DB:-auth_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - auth-service-db-data:/var/lib/postgresql/data
+      - ./database/init/auth-service.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - wms-network
+
+  product-service:
+    build:
+      context: ./services/product-service
+    container_name: wms-product-service
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3002
+      JWT_SECRET: ${JWT_SECRET:-change-me-super-secret}
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@product-service-db:5432/${PRODUCT_DB:-product_db}
+    ports:
+      - "3002:3002"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      product-service-db:
+        condition: service_healthy
+    networks:
+      - wms-network
+
+  product-service-db:
+    image: postgres:16-alpine
+    container_name: wms-product-service-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${PRODUCT_DB:-product_db}
+    ports:
+      - "5433:5432"
+    volumes:
+      - product-service-db-data:/var/lib/postgresql/data
+      - ./database/init/product-service.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - wms-network
+
+  inventory-service:
+    build:
+      context: ./services/inventory-service
+    container_name: wms-inventory-service
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3003
+      JWT_SECRET: ${JWT_SECRET:-change-me-super-secret}
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@inventory-service-db:5432/${INVENTORY_DB:-inventory_db}
+    ports:
+      - "3003:3003"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      inventory-service-db:
+        condition: service_healthy
+    networks:
+      - wms-network
+
+  inventory-service-db:
+    image: postgres:16-alpine
+    container_name: wms-inventory-service-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${INVENTORY_DB:-inventory_db}
+    ports:
+      - "5434:5432"
+    volumes:
+      - inventory-service-db-data:/var/lib/postgresql/data
+      - ./database/init/inventory-service.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - wms-network
+
+  transaction-service:
+    build:
+      context: ./services/transaction-service
+    container_name: wms-transaction-service
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3004
+      JWT_SECRET: ${JWT_SECRET:-change-me-super-secret}
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@transaction-service-db:5432/${TRANSACTION_DB:-transaction_db}
+    ports:
+      - "3004:3004"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      transaction-service-db:
+        condition: service_healthy
+    networks:
+      - wms-network
+
+  transaction-service-db:
+    image: postgres:16-alpine
+    container_name: wms-transaction-service-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${TRANSACTION_DB:-transaction_db}
+    ports:
+      - "5435:5432"
+    volumes:
+      - transaction-service-db-data:/var/lib/postgresql/data
+      - ./database/init/transaction-service.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - wms-network
+
+  report-service:
+    build:
+      context: ./services/report-service
+    container_name: wms-report-service
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3005
+      JWT_SECRET: ${JWT_SECRET:-change-me-super-secret}
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@report-service-db:5432/${REPORT_DB:-report_db}
+    ports:
+      - "3005:3005"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      report-service-db:
+        condition: service_healthy
+    networks:
+      - wms-network
+
+  report-service-db:
+    image: postgres:16-alpine
+    container_name: wms-report-service-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${REPORT_DB:-report_db}
+    ports:
+      - "5436:5432"
+    volumes:
+      - report-service-db-data:/var/lib/postgresql/data
+      - ./database/init/report-service.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - wms-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: wms-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - wms-network
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: wms-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-guest}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - wms-network
+
+networks:
+  wms-network:
+    driver: bridge
+
+volumes:
+  auth-service-db-data:
+  product-service-db-data:
+  inventory-service-db-data:
+  transaction-service-db-data:
+  report-service-db-data:
