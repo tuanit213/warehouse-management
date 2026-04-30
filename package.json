@@ -3,10 +3,13 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "compose:up": "docker compose up --build",
+    "compose:up": "docker compose up -d --build",
     "compose:down": "docker compose down",
     "compose:logs": "docker compose logs -f --tail=200",
-    "check": "docker compose config"
+    "check": "docker compose config",
+    "seed:demo": "node scripts/seed-demo-data.js",
+    "smoke:test": "node scripts/smoke-test.js",
+    "demo:ready": "npm run compose:up && npm run seed:demo && npm run smoke:test"
   },
   "workspaces": [
     "frontend",

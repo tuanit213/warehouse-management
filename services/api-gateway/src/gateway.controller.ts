@@ -26,6 +26,9 @@ export class GatewayController {
   async proxy(@Req() req: any, @Res() res: any) {
     const original = req.originalUrl.replace(/^\/api/, '') || '/';
     const pathOnly = original.split('?')[0];
+    if (pathOnly === '/health') {
+      return res.status(200).json({ service: 'api-gateway', status: 'ok', timestamp: new Date().toISOString() });
+    }
     const [, first] = pathOnly.split('/');
     const base = serviceMap[first];
     if (!base) throw new HttpException({ message: 'No route for service', path: original }, 404);
