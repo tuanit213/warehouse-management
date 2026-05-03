@@ -5,7 +5,7 @@ import * as bcrypt from 'bcryptjs';
 import { PG_POOL } from './database';
 import { ChangePasswordDto, LoginDto, RegisterDto, Role, UpdateRoleDto } from './dto';
 
-type JwtPayload = { sub: string; email: string; role: Role };
+type JwtPayload = { sub: string; email: string; role: Role; fullName: string };
 
 @Injectable()
 export class AuthService {
@@ -17,7 +17,7 @@ export class AuthService {
   }
 
   private async sign(user: any) {
-    const payload: JwtPayload = { sub: user.id, email: user.email, role: user.role };
+    const payload: JwtPayload = { sub: user.id, email: user.email, role: user.role, fullName: user.full_name };
     return {
       accessToken: await this.jwt.signAsync(payload),
       tokenType: 'Bearer',
@@ -33,7 +33,7 @@ export class AuthService {
     const role = dto.role || 'WAREHOUSE_STAFF';
     const result = await this.db.query(
       'INSERT INTO users(email, password_hash, full_name, role) VALUES($1,$2,$3,$4) RETURNING *',
-      [dto.email, passwordHash, dto.fullName, role],
+      [dto.email.trim().toLowerCase(), passwordHash, dto.fullName.trim(), role],
     );
     return this.sign(result.rows[0]);
   }

@@ -43,6 +43,8 @@ Response:
 
 ## Transaction Service
 
+- GET /transactions?type=&status=
+- GET /transactions/:id
 - POST /inbounds
 - POST /inbounds/:id/confirm
 - GET /inbounds/:id/pdf

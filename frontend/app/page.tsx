@@ -1,180 +1,122 @@
-const reasons = [
-  {
-    icon: '▣',
-    title: 'Quản lý tồn kho thủ công',
-    text: 'Kiểm tra hàng tồn bằng cách thủ công khiến bạn mất thời gian, hàng hoá bị thiếu hụt, dư thừa và khó kiểm soát.',
-  },
-  {
-    icon: '↗',
-    title: 'Nhập, bán hàng không chính xác',
-    text: 'Không kiểm soát được quy trình xuất nhập, các mặt hàng bán chạy hoặc tồn kho chậm được xử lý kịp thời.',
-  },
-  {
-    icon: '◷',
-    title: 'Không quản lý được lịch sử giao dịch',
-    text: 'Không quản lý được lịch sử mua hàng từ nhà cung cấp gây khó khăn trong đối soát công nợ và xoay vòng vốn.',
-  },
-];
+'use client';
 
-const features = ['Tối ưu quản lý tồn kho theo lô và hạn sử dụng', 'Quản lý sản phẩm linh hoạt theo đơn vị tính', 'Kiểm kê hàng hoá chính xác'];
+import { FormEvent, useEffect, useMemo, useState } from 'react';
+
+type Category = { id: string; name: string };
+type Product = { id: string; sku: string; name: string; description?: string | null; unit: string; categoryId?: string | null; categoryName?: string | null; costPrice: number; createdAt: string };
+type ProductResponse = { data: Product[]; meta: { page: number; limit: number; total: number } };
+type User = { email: string; fullName?: string; role: string };
+type AuthResponse = { accessToken: string; user: User };
+type Warehouse = { id: string; code: string; name: string; address?: string | null };
+type Location = { id: string; warehouseId: string; warehouseCode?: string; code: string; description?: string | null };
+type StockLevel = { id: string; productId: string; warehouseId: string; warehouseCode?: string; locationId?: string | null; locationCode?: string | null; quantity: number; minQuantity: number; lastMovementAt?: string };
+type StockAlert = StockLevel;
+type Supplier = { id: string; code: string; name: string; contactName?: string | null; phone?: string | null; email?: string | null; address?: string | null };
+type Transaction = { id: string; type: 'INBOUND' | 'OUTBOUND'; code: string; warehouseId: string; supplierId?: string | null; status: string; totalQuantity: number; totalValue: number; createdAt: string; items: Array<{ productId: string; locationId?: string | null; quantity: number; unitPrice: number }> };
+type ProductForm = { sku: string; name: string; description: string; unit: string; categoryId: string; costPrice: string };
+type WarehouseForm = { code: string; name: string; address: string };
+type LocationForm = { code: string; description: string };
+type StockForm = { productId: string; warehouseId: string; locationId: string; quantity: string; minQuantity: string };
+type SupplierForm = { code: string; name: string; contactName: string; phone: string; email: string; address: string };
+type TransactionForm = { supplierId: string; productId: string; warehouseId: string; locationId: string; quantity: string; unitPrice: string; note: string };
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
+const TOKEN_KEY = 'wms_access_token';
+const THEME_KEY = 'wms_theme';
+const PAGE_SIZE = 8;
+const emptyProductForm: ProductForm = { sku: '', name: '', description: '', unit: 'cái', categoryId: '', costPrice: '0' };
+const emptyWarehouseForm: WarehouseForm = { code: '', name: '', address: '' };
+const emptyLocationForm: LocationForm = { code: '', description: '' };
+const emptyStockForm: StockForm = { productId: '', warehouseId: '', locationId: '', quantity: '0', minQuantity: '0' };
+const emptySupplierForm: SupplierForm = { code: '', name: '', contactName: '', phone: '', email: '', address: '' };
+const emptyTransactionForm: TransactionForm = { supplierId: '', productId: '', warehouseId: '', locationId: '', quantity: '1', unitPrice: '0', note: '' };
+
+class ApiError extends Error { constructor(message: string, readonly status: number) { super(message); } }
+async function parseResponse<T>(response: Response): Promise<T> { const text = await response.text(); const data = text ? JSON.parse(text) : null; if (!response.ok) throw new ApiError(Array.isArray(data?.message) ? data.message.join(', ') : data?.message || `${response.status} ${response.statusText}`, response.status); return data; }
 
 export default function Home() {
-  return (
-    <main>
-      <header className="topbar">
-        <nav className="nav wrap" aria-label="Điều hướng chính">
-          <a className="brand" href="#top" aria-label="tuanit trang chủ">
-            <span className="brand-mark">t</span>
-            <strong>tuanit</strong>
-          </a>
-          <div className="nav-links">
-            <a href="#solutions">Giải pháp</a>
-            <a href="#pricing">Bảng giá</a>
-            <a href="#customers">Khách hàng</a>
-            <a href="#support">Hỗ trợ</a>
-            <a href="#tools">Công cụ tính thuế</a>
-            <a href="#updates">Cập nhật mới</a>
-          </div>
-          <div className="nav-actions">
-            <a className="btn ghost" href="#login">Đăng nhập</a>
-            <a className="btn primary" href="#trial">Bắt đầu miễn phí</a>
-          </div>
-        </nav>
-        <div className="subnav">
-          <div className="wrap subnav-inner">
-            <strong>Quản lý</strong>
-            <a href="#overview">Tổng quan</a>
-            <a href="#orders">Đơn hàng</a>
-            <a className="active" href="#inventory">Tồn kho</a>
-            <a href="#payment">Thanh toán</a>
-            <a href="#shipping">Vận chuyển⌄</a>
-            <a href="#cashflow">Thu chi</a>
-          </div>
-        </div>
-      </header>
+  const [token, setToken] = useState('');
+  const [user, setUser] = useState<User | null>(null);
+  const [loginForm, setLoginForm] = useState({ email: '', password: '' });
+  const [checkingSession, setCheckingSession] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState('Đăng nhập để quản lý kho.');
+  const [error, setError] = useState('');
 
-      <section id="top" className="hero-section">
-        <div className="wrap hero-grid">
-          <div className="hero-copy">
-            <p className="eyebrow">Phần mềm quản lý kho tuanit</p>
-            <h1>Kinh doanh hiệu quả cùng phần mềm quản lý kho tuanit</h1>
-            <p>Hỗ trợ doanh nghiệp kiểm kê chính xác số lượng tồn kho, giám sát thất thoát trong quá trình nhập, xuất hàng hoá.</p>
-            <a className="btn cta" href="#trial">Dùng thử miễn phí</a>
-          </div>
-          <div className="dashboard-art" aria-label="Minh hoạ dashboard tồn kho">
-            <div className="panel large-panel">
-              <div className="mini-logo"><span className="brand-mark small">t</span>tuanit</div>
-              <h3>Chi tiết tồn kho</h3>
-              <div className="kpi-row">
-                <span>↘ Tổng lượng tồn<br /><b>12,223,984</b></span>
-                <span>◔ Tổng xuất<br /><b>15,343,335</b></span>
-                <span>↗ Tỷ lệ phát sinh<br /><b>25,204,335</b></span>
-              </div>
-              <div className="chart"><i /><i /><i /><i /><i /><i /></div>
-              <div className="table-lines">{Array.from({ length: 5 }).map((_, i) => <span key={i} />)}</div>
-            </div>
-            <div className="panel phone-panel">
-              <b>Chi tiết</b>
-              <p>Doanh thu thuần</p>
-              <strong>671,247,692đ</strong>
-              <div className="tiny-chart" />
-            </div>
-            <div className="panel floating-card">
-              <b>#NVHD428</b>
-              <span>Loại: Trạng thái</span>
-              <span>Số lượng</span>
-              <span>Tổng tiền</span>
-            </div>
-            <div className="barcode">▦▦▥▥▦▥<br />▥▦▦▥▥▦</div>
-          </div>
-        </div>
-      </section>
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [keyword, setKeyword] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [productForm, setProductForm] = useState<ProductForm>(emptyProductForm);
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
 
-      <section id="inventory" className="problem-section">
-        <div className="wrap">
-          <h2>3 nguyên nhân bán nhiều nhưng thất thoát hàng hoá cao</h2>
-          <div className="reason-grid">
-            {reasons.map((reason) => (
-              <article className="reason-card" key={reason.title}>
-                <div className="reason-icon">{reason.icon}</div>
-                <h3>{reason.title}</h3>
-                <p>{reason.text}</p>
-                <a href="#solutions">Xem giải pháp →</a>
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [allLocations, setAllLocations] = useState<Location[]>([]);
+  const [selectedWarehouseId, setSelectedWarehouseId] = useState('');
+  const [warehouseForm, setWarehouseForm] = useState<WarehouseForm>(emptyWarehouseForm);
+  const [locationForm, setLocationForm] = useState<LocationForm>(emptyLocationForm);
+  const [editingWarehouseId, setEditingWarehouseId] = useState<string | null>(null);
+  const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
+  const [stockLevels, setStockLevels] = useState<StockLevel[]>([]);
+  const [stockProductFilter, setStockProductFilter] = useState('');
+  const [lowStockAlerts, setLowStockAlerts] = useState<StockAlert[]>([]);
+  const [agingAlerts, setAgingAlerts] = useState<StockAlert[]>([]);
+  const [stockForm, setStockForm] = useState<StockForm>(emptyStockForm);
+  const [inventoryError, setInventoryError] = useState('');
+  const [inventoryLoading, setInventoryLoading] = useState(false);
 
-      <section id="solutions" className="content-section wrap two-col">
-        <div>
-          <p className="section-label">▧ Quản lý tồn kho hiệu quả</p>
-          <h2>Kiểm soát chính xác số lượng tồn kho</h2>
-          <ul>
-            <li>Cập nhật toàn bộ dữ liệu sản phẩm lên kho hàng online của tuanit.</li>
-            <li>Quản lý số lượng, mã hàng, biến thể sản phẩm chi tiết đến từng kho hàng.</li>
-            <li>Cân đối tỷ lệ hàng tồn hợp lý trên toàn bộ kênh bán, từ offline đến online.</li>
-          </ul>
-        </div>
-        <div className="flow-art">
-          <span className="bubble orange">Thêm 218 đơn mới</span>
-          <span className="bubble blue">Thêm 132 đơn mới</span>
-          <span className="bubble cyan">Tổng tồn kho</span>
-          <div className="metric-card">629,223,342đ <small>Lợi nhuận</small></div>
-        </div>
-      </section>
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [supplierForm, setSupplierForm] = useState<SupplierForm>(emptySupplierForm);
+  const [editingSupplierId, setEditingSupplierId] = useState<string | null>(null);
+  const [inboundForm, setInboundForm] = useState<TransactionForm>(emptyTransactionForm);
+  const [outboundForm, setOutboundForm] = useState<TransactionForm>(emptyTransactionForm);
+  const [transactionError, setTransactionError] = useState('');
+  const [transactionLoading, setTransactionLoading] = useState(false);
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
-      <section className="transfer-section wrap two-col reverse">
-        <div className="paper-stack">
-          <div className="paper"><b>Mã</b><span /></div>
-          <div className="paper offset"><b>Kho</b><span /></div>
-          <div className="paper small-paper"><b>Số lượng</b><span /></div>
-        </div>
-        <div>
-          <h2>Quản lý điều chuyển hàng hoá giữa nhiều kho</h2>
-          <ul>
-            <li>Điều chuyển hàng hoá dễ dàng giữa các kho, không xây thừa, thiếu sản phẩm.</li>
-            <li>Phân bổ hàng hoá nhanh chóng, linh động và kịp nhu cầu mua hàng.</li>
-            <li>Ghi nhận mọi lịch sử điều chuyển hàng hoá và tồn kho.</li>
-          </ul>
-          <a className="btn cta" href="#trial">Dùng thử miễn phí</a>
-        </div>
-      </section>
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const categoryMap = useMemo(() => new Map(categories.map((c) => [c.id, c.name])), [categories]);
+  const selectedWarehouse = warehouses.find((w) => w.id === selectedWarehouseId);
 
-      <section className="feature-band">
-        <span>Nhiều tính năng hữu ích</span>
-        <div className="wrap feature-box">
-          <div className="feature-open">
-            <b>1</b>
-            <h2>{features[0]}</h2>
-            <p>Cho phép tạo, nhập - bán sản phẩm, quản lý hàng tồn kho và xuất báo cáo theo lô, hạn sử dụng.</p>
-            <a href="#trial">Trải nghiệm ngay →</a>
-          </div>
-          <div className="feature-preview">
-            <div className="mock-table" />
-          </div>
-          <div className="feature-row"><b>2</b><strong>{features[1]}</strong><span>＋</span></div>
-        </div>
-      </section>
+  useEffect(() => { const savedTheme = localStorage.getItem(THEME_KEY) as 'light' | 'dark' | null; const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches; setTheme(savedTheme || (prefersDark ? 'dark' : 'light')); const saved = localStorage.getItem(TOKEN_KEY) || ''; saved ? restoreSession(saved) : setCheckingSession(false); }, []);
+  function toggleTheme() { const nextTheme = theme === 'dark' ? 'light' : 'dark'; setTheme(nextTheme); localStorage.setItem(THEME_KEY, nextTheme); }
+  function headers(accessToken = token) { return { authorization: `Bearer ${accessToken}` }; }
+  function logout(message = 'Đã đăng xuất.') { localStorage.removeItem(TOKEN_KEY); setToken(''); setUser(null); setStatus(message); setCheckingSession(false); }
+  function handleApiError(apiError: unknown, fallback: string) { if (apiError instanceof ApiError && apiError.status === 401) { logout('Phiên đăng nhập hết hạn, vui lòng đăng nhập lại.'); return true; } const message = apiError instanceof Error ? apiError.message : fallback; setError(message); return false; }
+  async function restoreSession(savedToken: string) { setLoading(true); try { const currentUser = await parseResponse<User>(await fetch(`${API_URL}/auth/me`, { headers: headers(savedToken) })); setToken(savedToken); setUser(currentUser); await loadInitial(savedToken); } catch { logout('Phiên đăng nhập hết hạn, vui lòng đăng nhập lại.'); } finally { setLoading(false); setCheckingSession(false); } }
+  async function login(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setLoading(true); setError(''); try { const auth = await parseResponse<AuthResponse>(await fetch(`${API_URL}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: loginForm.email.trim(), password: loginForm.password }) })); localStorage.setItem(TOKEN_KEY, auth.accessToken); setToken(auth.accessToken); setUser(auth.user); await loadInitial(auth.accessToken); } catch (e) { setError(e instanceof Error ? e.message : 'Không đăng nhập được'); } finally { setLoading(false); } }
+  async function loadInitial(accessToken = token) { await Promise.all([loadProducts(accessToken, 1, '', false), loadInventory(accessToken), loadTransactions(accessToken)]); }
 
-      <section className="content-section wrap">
-        <div className="final-head">
-          <p className="section-label">▧ Kiểm kê hàng hoá chính xác</p>
-          <a className="btn cta" href="#trial">Dùng thử miễn phí</a>
-        </div>
-        <div className="inspect-art">
-          <div className="product-card"><b>Túi Xách Houndstooth</b><strong>741.000đ</strong><span>SKU: WHR2504</span></div>
-          <div className="donut-card"><span>700</span><span>300</span><span>200</span><span>87</span></div>
-          <div className="person-card">👨🏻‍💼</div>
-        </div>
-        <div className="benefit-grid">
-          <article><h3>Đảm bảo không chênh lệch hàng tồn</h3><p>Phần mềm quản lý kho tuanit giúp đối soát số liệu tồn kho rõ ràng.</p></article>
-          <article><h3>Cân bằng kho, giảm sai sót</h3><p>Sau khi phát hiện chênh lệch trong quá trình kiểm kho, hệ thống hỗ trợ cập nhật nhanh.</p></article>
-          <article><h3>Tránh thất thoát hàng hoá</h3><p>Phần mềm quản lý kho hàng giúp doanh nghiệp theo dõi mọi giao dịch quan trọng.</p></article>
-        </div>
-      </section>
+  async function loadProducts(accessToken = token, nextPage = page, nextKeyword = keyword, showLoading = true) { if (showLoading) setLoading(true); try { const params = new URLSearchParams({ page: String(nextPage), limit: String(PAGE_SIZE) }); if (nextKeyword.trim()) params.set('keyword', nextKeyword.trim()); const [cats, result] = await Promise.all([parseResponse<Category[]>(await fetch(`${API_URL}/categories`, { headers: headers(accessToken) })), parseResponse<ProductResponse>(await fetch(`${API_URL}/products?${params}`, { headers: headers(accessToken) }))]); setCategories(cats); setProducts(result.data); setTotal(result.meta.total); setPage(result.meta.page); setKeyword(nextKeyword); setStatus(`Đã tải ${result.data.length}/${result.meta.total} sản phẩm.`); } catch (e) { handleApiError(e, 'Không tải được sản phẩm'); } finally { setLoading(false); } }
+  function editProduct(product: Product) { setEditingProductId(product.id); setProductForm({ sku: product.sku, name: product.name, description: product.description || '', unit: product.unit, categoryId: product.categoryId || '', costPrice: String(product.costPrice || 0) }); }
+  async function submitProduct(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setSaving(true); try { await parseResponse<Product>(await fetch(`${API_URL}/products${editingProductId ? `/${editingProductId}` : ''}`, { method: editingProductId ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json', ...headers() }, body: JSON.stringify({ sku: productForm.sku.trim(), name: productForm.name.trim(), description: productForm.description.trim() || undefined, unit: productForm.unit.trim(), categoryId: productForm.categoryId || undefined, costPrice: Number(productForm.costPrice || 0) }) })); setProductForm(emptyProductForm); setEditingProductId(null); await loadProducts(token, editingProductId ? page : 1, keyword); } catch (e) { handleApiError(e, 'Không lưu được sản phẩm'); } finally { setSaving(false); } }
+  async function deleteProduct(product: Product) { if (!confirm(`Xóa sản phẩm ${product.sku}?`)) return; setSaving(true); try { await parseResponse(await fetch(`${API_URL}/products/${product.id}`, { method: 'DELETE', headers: headers() })); await loadProducts(token, products.length === 1 && page > 1 ? page - 1 : page, keyword); } catch (e) { handleApiError(e, 'Không xóa được sản phẩm'); } finally { setSaving(false); } }
 
-      <a className="chat" href="#support" aria-label="Chat hỗ trợ">⌁</a>
-    </main>
-  );
+  async function loadInventory(accessToken = token, warehouseId = selectedWarehouseId, productId = stockProductFilter) { setInventoryLoading(true); setInventoryError(''); try { const params = new URLSearchParams(); if (warehouseId) params.set('warehouseId', warehouseId); if (productId.trim()) params.set('productId', productId.trim()); const query = params.toString() ? `?${params}` : ''; const [whs, locs, allLocs, stocks, low, aging] = await Promise.all([parseResponse<Warehouse[]>(await fetch(`${API_URL}/warehouses`, { headers: headers(accessToken) })), warehouseId ? parseResponse<Location[]>(await fetch(`${API_URL}/warehouses/${warehouseId}/locations`, { headers: headers(accessToken) })) : Promise.resolve([]), parseResponse<Location[]>(await fetch(`${API_URL}/locations`, { headers: headers(accessToken) })), parseResponse<StockLevel[]>(await fetch(`${API_URL}/stock-levels${query}`, { headers: headers(accessToken) })), parseResponse<StockAlert[]>(await fetch(`${API_URL}/stock-alerts/low-stock${query}`, { headers: headers(accessToken) })), parseResponse<StockAlert[]>(await fetch(`${API_URL}/stock-alerts/aging${warehouseId ? `?warehouseId=${warehouseId}` : ''}`, { headers: headers(accessToken) }))]); setWarehouses(whs); setLocations(locs); setAllLocations(allLocs); setStockLevels(stocks); setLowStockAlerts(low); setAgingAlerts(aging); } catch (e) { if (!handleApiError(e, 'Không tải được tồn kho')) setInventoryError(e instanceof Error ? e.message : 'Không tải được tồn kho'); } finally { setInventoryLoading(false); } }
+  async function submitWarehouse(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setInventoryLoading(true); try { await parseResponse<Warehouse>(await fetch(`${API_URL}/warehouses${editingWarehouseId ? `/${editingWarehouseId}` : ''}`, { method: editingWarehouseId ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json', ...headers() }, body: JSON.stringify({ code: warehouseForm.code.trim(), name: warehouseForm.name.trim(), address: warehouseForm.address.trim() || undefined }) })); setWarehouseForm(emptyWarehouseForm); setEditingWarehouseId(null); await loadInventory(token); } catch (e) { handleApiError(e, 'Không lưu được kho'); } finally { setInventoryLoading(false); } }
+  async function submitLocation(event: FormEvent<HTMLFormElement>) { event.preventDefault(); if (!selectedWarehouseId) { setInventoryError('Vui lòng chọn kho trước khi tạo vị trí.'); return; } setInventoryLoading(true); try { await parseResponse<Location>(await fetch(`${API_URL}/warehouses/${selectedWarehouseId}/locations${editingLocationId ? `/${editingLocationId}` : ''}`, { method: editingLocationId ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json', ...headers() }, body: JSON.stringify({ code: locationForm.code.trim(), description: locationForm.description.trim() || undefined }) })); setLocationForm(emptyLocationForm); setEditingLocationId(null); await loadInventory(token, selectedWarehouseId, stockProductFilter); } catch (e) { handleApiError(e, 'Không lưu được vị trí'); } finally { setInventoryLoading(false); } }
+  async function submitStock(event: FormEvent<HTMLFormElement>) { event.preventDefault(); if (!stockForm.productId || !stockForm.warehouseId) { setInventoryError('Cần chọn sản phẩm và kho trước khi cập nhật tồn.'); return; } setInventoryLoading(true); try { await parseResponse<StockLevel>(await fetch(`${API_URL}/stock-levels`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers() }, body: JSON.stringify({ productId: stockForm.productId, warehouseId: stockForm.warehouseId, locationId: stockForm.locationId || undefined, quantity: Number(stockForm.quantity || 0), minQuantity: Number(stockForm.minQuantity || 0) }) })); setStockForm(emptyStockForm); await loadInventory(token, selectedWarehouseId, stockProductFilter); } catch (e) { handleApiError(e, 'Không cập nhật được tồn kho'); } finally { setInventoryLoading(false); } }
+
+  async function loadTransactions(accessToken = token) { setTransactionLoading(true); setTransactionError(''); try { const [supplierResult, transactionResult] = await Promise.all([parseResponse<Supplier[]>(await fetch(`${API_URL}/suppliers`, { headers: headers(accessToken) })), parseResponse<Transaction[]>(await fetch(`${API_URL}/transactions`, { headers: headers(accessToken) }))]); setSuppliers(supplierResult); setTransactions(transactionResult); } catch (e) { if (!handleApiError(e, 'Không tải được giao dịch')) setTransactionError(e instanceof Error ? e.message : 'Không tải được giao dịch'); } finally { setTransactionLoading(false); } }
+  async function submitSupplier(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setTransactionLoading(true); try { await parseResponse<Supplier>(await fetch(`${API_URL}/suppliers${editingSupplierId ? `/${editingSupplierId}` : ''}`, { method: editingSupplierId ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json', ...headers() }, body: JSON.stringify({ code: supplierForm.code.trim(), name: supplierForm.name.trim(), contactName: supplierForm.contactName.trim() || undefined, phone: supplierForm.phone.trim() || undefined, email: supplierForm.email.trim() || undefined, address: supplierForm.address.trim() || undefined }) })); setSupplierForm(emptySupplierForm); setEditingSupplierId(null); await loadTransactions(token); } catch (e) { handleApiError(e, 'Không lưu được nhà cung cấp'); } finally { setTransactionLoading(false); } }
+  async function submitTransaction(event: FormEvent<HTMLFormElement>, type: 'INBOUND' | 'OUTBOUND') { event.preventDefault(); const form = type === 'INBOUND' ? inboundForm : outboundForm; if (!form.productId || !form.warehouseId || (type === 'INBOUND' && !form.supplierId)) { setTransactionError('Vui lòng nhập đủ thông tin phiếu.'); return; } setTransactionLoading(true); try { await parseResponse<Transaction>(await fetch(`${API_URL}${type === 'INBOUND' ? '/inbounds' : '/outbounds'}`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers() }, body: JSON.stringify({ warehouseId: form.warehouseId, supplierId: type === 'INBOUND' ? form.supplierId : undefined, note: form.note.trim() || undefined, items: [{ productId: form.productId, locationId: form.locationId || undefined, quantity: Number(form.quantity || 0), unitPrice: Number(form.unitPrice || 0) }] }) })); type === 'INBOUND' ? setInboundForm(emptyTransactionForm) : setOutboundForm(emptyTransactionForm); await loadTransactions(token); } catch (e) { handleApiError(e, 'Không tạo được phiếu'); } finally { setTransactionLoading(false); } }
+  async function confirmTransaction(transaction: Transaction) { setTransactionLoading(true); try { await parseResponse<Transaction>(await fetch(`${API_URL}${transaction.type === 'INBOUND' ? `/inbounds/${transaction.id}/confirm` : `/outbounds/${transaction.id}/confirm`}`, { method: 'POST', headers: headers() })); await Promise.all([loadTransactions(token), loadInventory(token)]); } catch (e) { handleApiError(e, 'Không xác nhận được phiếu'); } finally { setTransactionLoading(false); } }
+
+  if (!token || !user) return <main className="login-shell" data-theme={theme}><form className="login-form" onSubmit={login}><span className="brand"><span className="brand-mark">t</span><strong>tuanit WMS</strong></span><h1>Đăng nhập quản lý kho</h1><p>{checkingSession ? 'Đang kiểm tra phiên...' : status}</p>{error && <p className="api-error">Lỗi: {error}</p>}<label>Email<input required type="email" value={loginForm.email} onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })} placeholder="admin@wms.local" /></label><label>Mật khẩu<input required type="password" value={loginForm.password} onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })} placeholder="Nhập mật khẩu" /></label><button className="btn cta" disabled={loading || checkingSession}>{loading || checkingSession ? 'Đang xử lý...' : 'Đăng nhập'}</button></form><div className="settings-widget"><button className="settings-button" type="button" aria-label="Mở cài đặt giao diện" onClick={() => setSettingsOpen(!settingsOpen)}>⚙</button>{settingsOpen && <section className="settings-panel" aria-label="Cài đặt giao diện"><div className="settings-head"><h2>Cài đặt giao diện</h2><button type="button" aria-label="Đóng cài đặt" onClick={() => setSettingsOpen(false)}>×</button></div><div className="settings-row"><div><strong>Dark Mode</strong><span>Chế độ hiện tại: {theme === 'dark' ? 'Tối' : 'Sáng'}</span></div><button className={theme === 'dark' ? 'switch is-on' : 'switch'} type="button" role="switch" aria-checked={theme === 'dark'} onClick={toggleTheme}><span /></button></div></section>}</div></main>;
+
+  const formOptions = (form: TransactionForm, setForm: (form: TransactionForm) => void, inbound = false) => <><select required={inbound} value={form.supplierId} disabled={!inbound} onChange={(e) => setForm({ ...form, supplierId: e.target.value })}><option value="">Chọn nhà cung cấp</option>{suppliers.map((s) => <option key={s.id} value={s.id}>{s.code} - {s.name}</option>)}</select><select required value={form.warehouseId} onChange={(e) => setForm({ ...form, warehouseId: e.target.value, locationId: '' })}><option value="">Chọn kho</option>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.code}</option>)}</select><select value={form.locationId} onChange={(e) => setForm({ ...form, locationId: e.target.value })}><option value="">Không gán vị trí</option>{allLocations.filter((l) => !form.warehouseId || l.warehouseId === form.warehouseId).map((l) => <option key={l.id} value={l.id}>{l.code}</option>)}</select><select required value={form.productId} onChange={(e) => setForm({ ...form, productId: e.target.value })}><option value="">Chọn sản phẩm</option>{products.map((p) => <option key={p.id} value={p.id}>{p.sku} - {p.name}</option>)}</select><input required type="number" min="0.01" step="0.01" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} placeholder="Số lượng" /><input type="number" min="0" value={form.unitPrice} onChange={(e) => setForm({ ...form, unitPrice: e.target.value })} placeholder="Đơn giá" /><input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="Ghi chú" /></>;
+
+  return <main data-theme={theme}><header className="topbar"><nav className="nav wrap"><a className="brand" href="#top"><span className="brand-mark">t</span><strong>tuanit WMS</strong></a><div className="nav-links"><a href="#products">Sản phẩm</a><a href="#inventory">Kho & tồn kho</a><a href="#transactions">Nhập/Xuất kho</a></div><button className="btn ghost" onClick={() => logout()}>Đăng xuất</button></nav></header><section id="top" className="hero-section"><div className="wrap"><p className="eyebrow">Warehouse Management System</p><h1>Quản lý kho rõ ràng, đúng workflow</h1><p>Form được tách theo nghiệp vụ để giảm nhập sai dữ liệu và giữ nguyên luồng API hiện có.</p></div></section>
+
+  <section id="products" className="manager-section wrap"><div className="manager-head"><div><p className="section-label">Sản phẩm</p><h2>Quản lý sản phẩm</h2><p>{status}</p>{error && <p className="api-error">Lỗi: {error}</p>}</div></div><div className="section-grid wide-left"><article className="card"><h3>Danh sách sản phẩm</h3><form className="toolbar" onSubmit={(e) => { e.preventDefault(); loadProducts(token, 1, searchInput); }}><input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Tìm SKU hoặc tên sản phẩm" /><button className="btn primary">Tìm</button></form><div className="table-wrap"><table><thead><tr><th>SKU</th><th>Tên</th><th>Danh mục</th><th>Giá vốn</th><th>Thao tác</th></tr></thead><tbody>{products.map((p) => <tr key={p.id}><td>{p.sku}</td><td><strong>{p.name}</strong><small>{p.unit}</small></td><td>{p.categoryName || (p.categoryId ? categoryMap.get(p.categoryId) : '') || 'Chưa phân loại'}</td><td>{Number(p.costPrice).toLocaleString('vi-VN')}đ</td><td><button onClick={() => editProduct(p)}>Sửa</button> <button className="danger" onClick={() => deleteProduct(p)}>Xóa</button></td></tr>)}</tbody></table></div><div className="pagination"><button className="btn ghost" disabled={page <= 1} onClick={() => loadProducts(token, page - 1, keyword)}>Trang trước</button><span>Trang {page}/{totalPages}</span><button className="btn ghost" disabled={page >= totalPages} onClick={() => loadProducts(token, page + 1, keyword)}>Trang sau</button></div></article><article className="card form-card"><h3>{editingProductId ? 'Sửa sản phẩm' : 'Thêm sản phẩm'}</h3><p>Thông tin sản phẩm được quản lý riêng, không trộn với nghiệp vụ kho.</p><form className="stack-form" onSubmit={submitProduct}><input required value={productForm.sku} onChange={(e) => setProductForm({ ...productForm, sku: e.target.value })} placeholder="SKU" /><input required value={productForm.name} onChange={(e) => setProductForm({ ...productForm, name: e.target.value })} placeholder="Tên sản phẩm" /><select value={productForm.categoryId} onChange={(e) => setProductForm({ ...productForm, categoryId: e.target.value })}><option value="">Chưa phân loại</option>{categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select><input required value={productForm.unit} onChange={(e) => setProductForm({ ...productForm, unit: e.target.value })} placeholder="Đơn vị tính" /><input type="number" min="0" value={productForm.costPrice} onChange={(e) => setProductForm({ ...productForm, costPrice: e.target.value })} placeholder="Giá vốn" /><textarea value={productForm.description} onChange={(e) => setProductForm({ ...productForm, description: e.target.value })} placeholder="Mô tả" /><button className="btn cta" disabled={saving}>{editingProductId ? 'Lưu thay đổi' : 'Tạo sản phẩm'}</button></form></article></div></section>
+
+  <section id="inventory" className="manager-section wrap"><div className="manager-head"><div><p className="section-label">Kho & tồn kho</p><h2>Quản lý kho, vị trí và tồn</h2>{inventoryError && <p className="api-error">Lỗi: {inventoryError}</p>}</div><button className="btn primary" onClick={() => loadInventory(token)}>{inventoryLoading ? 'Đang tải...' : 'Tải lại tồn kho'}</button></div><div className="section-grid three"><article className="card"><h3>Kho hàng</h3><p>Tạo hoặc sửa thông tin kho.</p><form className="stack-form" onSubmit={submitWarehouse}><input required value={warehouseForm.code} onChange={(e) => setWarehouseForm({ ...warehouseForm, code: e.target.value })} placeholder="Mã kho" /><input required value={warehouseForm.name} onChange={(e) => setWarehouseForm({ ...warehouseForm, name: e.target.value })} placeholder="Tên kho" /><input value={warehouseForm.address} onChange={(e) => setWarehouseForm({ ...warehouseForm, address: e.target.value })} placeholder="Địa chỉ" /><button className="btn cta">Lưu kho</button></form><div className="mini-list">{warehouses.map((w) => <button key={w.id} className={selectedWarehouseId === w.id ? 'selected' : ''} onClick={() => { setSelectedWarehouseId(w.id); setStockForm({ ...stockForm, warehouseId: w.id }); loadInventory(token, w.id, stockProductFilter); }}>{w.code} - {w.name}</button>)}</div></article><article className="card"><h3>Vị trí trong kho</h3><p>{selectedWarehouse ? `Đang chọn kho ${selectedWarehouse.code}` : 'Chọn kho trước khi thêm vị trí.'}</p><form className="stack-form" onSubmit={submitLocation}><input required value={locationForm.code} onChange={(e) => setLocationForm({ ...locationForm, code: e.target.value })} placeholder="Mã vị trí" /><input value={locationForm.description} onChange={(e) => setLocationForm({ ...locationForm, description: e.target.value })} placeholder="Mô tả" /><button className="btn cta" disabled={!selectedWarehouseId}>Lưu vị trí</button></form><div className="mini-list">{locations.map((l) => <span key={l.id}>{l.code} - {l.description || 'Không có mô tả'}</span>)}</div></article><article className="card"><h3>Cập nhật tồn kho</h3><p>Dùng cho MVP: cập nhật số lượng hiện tại và tồn tối thiểu.</p><form className="stack-form" onSubmit={submitStock}><select required value={stockForm.productId} onChange={(e) => setStockForm({ ...stockForm, productId: e.target.value })}><option value="">Chọn sản phẩm</option>{products.map((p) => <option key={p.id} value={p.id}>{p.sku}</option>)}</select><select required value={stockForm.warehouseId} onChange={(e) => setStockForm({ ...stockForm, warehouseId: e.target.value, locationId: '' })}><option value="">Chọn kho</option>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.code}</option>)}</select><select value={stockForm.locationId} onChange={(e) => setStockForm({ ...stockForm, locationId: e.target.value })}><option value="">Không gán vị trí</option>{allLocations.filter((l) => !stockForm.warehouseId || l.warehouseId === stockForm.warehouseId).map((l) => <option key={l.id} value={l.id}>{l.code}</option>)}</select><input type="number" min="0" value={stockForm.quantity} onChange={(e) => setStockForm({ ...stockForm, quantity: e.target.value })} placeholder="Số lượng hiện tại" /><input type="number" min="0" value={stockForm.minQuantity} onChange={(e) => setStockForm({ ...stockForm, minQuantity: e.target.value })} placeholder="Tồn tối thiểu" /><button className="btn cta" disabled={!stockForm.productId || !stockForm.warehouseId}>Cập nhật tồn</button></form></article></div><div className="card"><h3>Bảng tồn kho</h3><div className="toolbar"><select value={selectedWarehouseId} onChange={(e) => setSelectedWarehouseId(e.target.value)}><option value="">Tất cả kho</option>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.code}</option>)}</select><input value={stockProductFilter} onChange={(e) => setStockProductFilter(e.target.value)} placeholder="Lọc theo productId" /><button className="btn primary" onClick={() => loadInventory(token, selectedWarehouseId, stockProductFilter)}>Lọc</button></div><div className="stats"><b>SKU có tồn: {stockLevels.length}</b><b>Tồn thấp: {lowStockAlerts.length}</b><b>Hàng lâu ngày: {agingAlerts.length}</b></div><div className="table-wrap"><table><thead><tr><th>Sản phẩm</th><th>Kho</th><th>Vị trí</th><th>Số lượng</th><th>Min</th></tr></thead><tbody>{stockLevels.map((s) => <tr key={s.id}><td>{s.productId}</td><td>{s.warehouseCode || s.warehouseId}</td><td>{s.locationCode || 'Không gán'}</td><td>{s.quantity}</td><td>{s.minQuantity}</td></tr>)}</tbody></table></div></div></section>
+
+  <section id="transactions" className="manager-section wrap"><div className="manager-head"><div><p className="section-label">Nhập/Xuất kho</p><h2>Nhà cung cấp và phiếu kho</h2>{transactionError && <p className="api-error">Lỗi: {transactionError}</p>}</div><button className="btn primary" onClick={() => loadTransactions(token)}>Tải lại giao dịch</button></div><div className="section-grid three"><article className="card"><h3>Nhà cung cấp</h3><form className="stack-form" onSubmit={submitSupplier}><input required value={supplierForm.code} onChange={(e) => setSupplierForm({ ...supplierForm, code: e.target.value })} placeholder="Mã NCC" /><input required value={supplierForm.name} onChange={(e) => setSupplierForm({ ...supplierForm, name: e.target.value })} placeholder="Tên nhà cung cấp" /><input value={supplierForm.contactName} onChange={(e) => setSupplierForm({ ...supplierForm, contactName: e.target.value })} placeholder="Người liên hệ" /><input value={supplierForm.phone} onChange={(e) => setSupplierForm({ ...supplierForm, phone: e.target.value })} placeholder="Điện thoại" /><input value={supplierForm.email} onChange={(e) => setSupplierForm({ ...supplierForm, email: e.target.value })} placeholder="Email" /><button className="btn cta">Lưu nhà cung cấp</button></form><div className="mini-list">{suppliers.map((s) => <button key={s.id} onClick={() => { setEditingSupplierId(s.id); setSupplierForm({ code: s.code, name: s.name, contactName: s.contactName || '', phone: s.phone || '', email: s.email || '', address: s.address || '' }); }}>{s.code} - {s.name}</button>)}</div></article><article className="card"><h3>Phiếu nhập</h3><p>Chọn nhà cung cấp, kho nhận và dòng hàng nhập.</p><form className="stack-form" onSubmit={(e) => submitTransaction(e, 'INBOUND')}>{formOptions(inboundForm, setInboundForm, true)}<button className="btn cta" disabled={transactionLoading}>Lưu nháp phiếu nhập</button></form></article><article className="card"><h3>Phiếu xuất</h3><p>Chọn kho xuất và dòng hàng cần xuất.</p><form className="stack-form" onSubmit={(e) => submitTransaction(e, 'OUTBOUND')}>{formOptions(outboundForm, setOutboundForm, false)}<button className="btn cta" disabled={transactionLoading}>Lưu nháp phiếu xuất</button></form></article></div><div className="card"><h3>Lịch sử giao dịch</h3><div className="table-wrap"><table><thead><tr><th>Mã phiếu</th><th>Loại</th><th>Trạng thái</th><th>Số lượng</th><th>Giá trị</th><th>Thao tác</th></tr></thead><tbody>{transactions.map((t) => <tr key={t.id}><td>{t.code}</td><td>{t.type}</td><td>{t.status}</td><td>{t.totalQuantity}</td><td>{Number(t.totalValue).toLocaleString('vi-VN')}đ</td><td>{t.status === 'DRAFT' && <button onClick={() => confirmTransaction(t)}>Xác nhận</button>} {t.type === 'INBOUND' && <a href={`${API_URL}/inbounds/${t.id}/pdf`} target="_blank">PDF</a>}</td></tr>)}</tbody></table></div></div></section><div className="settings-widget"><button className="settings-button" type="button" aria-label="Mở cài đặt giao diện" onClick={() => setSettingsOpen(!settingsOpen)}>⚙</button>{settingsOpen && <section className="settings-panel" aria-label="Cài đặt giao diện"><div className="settings-head"><h2>Cài đặt giao diện</h2><button type="button" aria-label="Đóng cài đặt" onClick={() => setSettingsOpen(false)}>×</button></div><div className="settings-row"><div><strong>Dark Mode</strong><span>Chế độ hiện tại: {theme === 'dark' ? 'Tối' : 'Sáng'}</span></div><button className={theme === 'dark' ? 'switch is-on' : 'switch'} type="button" role="switch" aria-checked={theme === 'dark'} onClick={toggleTheme}><span /></button></div></section>}</div></main>;
 }
