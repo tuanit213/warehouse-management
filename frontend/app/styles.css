@@ -201,6 +201,20 @@ td button, td a, .mini-list button {
 .stats { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
 .stats b { border-radius: 999px; background: var(--soft); color: var(--soft-text); padding: 9px 12px; }
 .api-error { color: #b91c1c; background: #fee2e2; border-radius: 14px; padding: 10px 12px; font-weight: 800; }
+.field-label { display: grid; gap: 7px; color: var(--muted); font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: .08em; }
+.field-label.full { grid-column: 1 / -1; }
+.transaction-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 12px; }
+.card-head p { margin: 6px 0 0; }
+.toolbar select { min-width: 190px; }
+.toolbar-note { align-self: center; color: var(--muted); font-weight: 800; }
+.status-pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 6px 10px; background: var(--soft); color: var(--soft-text); font-size: 12px; font-weight: 900; }
+.status-pill.inbound { background: #dcfce7; color: #166534; }
+.status-pill.outbound { background: #fee2e2; color: #991b1b; }
+.report-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.metric-card.alert { background: linear-gradient(135deg, #f97316, #dc2626); }
+.report-list { display: grid; gap: 10px; margin-top: 14px; }
+.report-list span { display: flex; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
 
 /* Login */
 .login-shell { display: grid; place-items: center; padding: 24px; overflow: auto; background: linear-gradient(135deg, #061631, #0d6efd); }
@@ -283,23 +297,53 @@ main[data-theme='dark'] {
   .settings-button { width: 50px; height: 50px; }
 }
 
-/* Dashboard shell */
-main:not(.login-shell) .hero-section { display: none; }
-.dashboard-shell.wrap { width: min(1440px, calc(100% - 32px)); }
-.dashboard-shell {
+/* Dashboard app shell */
+.app-shell {
+  --header-height: 72px;
+  display: grid;
+  grid-template-rows: var(--header-height) minmax(0, 1fr);
+}
+.app-shell .topbar {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: var(--header-height);
+}
+.app-shell .nav {
+  width: min(1440px, calc(100% - 32px));
+  min-height: var(--header-height);
+  margin: 0 auto;
+  padding: 10px 0;
+}
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.user-chip {
+  display: grid;
+  gap: 2px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  font-weight: 900;
+}
+.user-chip small { color: var(--muted); font-size: 11px; }
+.app-layout {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
-  gap: 24px;
-  align-items: stretch;
-  height: calc(100vh - 72px);
-  padding: 18px 0 22px;
+  gap: 20px;
+  width: min(1440px, calc(100% - 32px));
+  height: calc(100vh - var(--header-height));
+  margin: var(--header-height) auto 0;
+  padding: 18px 0;
   overflow: hidden;
 }
 .sidebar {
-  position: static;
-  max-height: 100%;
+  height: 100%;
   overflow: auto;
   display: grid;
+  align-content: start;
   gap: 10px;
   padding: 18px;
   border: 1px solid var(--line);
@@ -323,19 +367,19 @@ main:not(.login-shell) .hero-section { display: none; }
   background: linear-gradient(135deg, rgba(13,110,253,.14), rgba(124,58,237,.12));
   color: #2563eb;
 }
-.nav-pill {
-  border-radius: 999px;
-  padding: 9px 12px;
-  background: transparent;
-  color: var(--muted);
-  font-weight: 900;
-}
-.nav-pill.active, .nav-pill:hover { background: var(--soft); color: var(--soft-text); }
 .dashboard-content {
   min-width: 0;
-  max-height: 100%;
+  height: 100%;
   overflow: auto;
-  padding: 2px 4px 24px 0;
+  padding-right: 4px;
+}
+.content-panel {
+  min-height: 100%;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 30px;
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  box-shadow: var(--shadow);
 }
 .screen-header {
   display: flex;
@@ -344,8 +388,9 @@ main:not(.login-shell) .hero-section { display: none; }
   align-items: flex-start;
   margin-bottom: 18px;
 }
-.screen-header h2 { margin: 4px 0; font-size: 34px; }
-.screen-header p { color: var(--muted); margin: 0; }
+.screen-header h1 { margin: 4px 0; font-size: 34px; letter-spacing: -0.03em; }
+.screen-header p, .view-status p { color: var(--muted); margin: 0; }
+.view-status { margin-bottom: 14px; }
 .overview-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -364,18 +409,29 @@ main:not(.login-shell) .hero-section { display: none; }
 .metric-card strong { display: block; margin-top: 8px; font-size: 34px; }
 .form-only { grid-template-columns: minmax(0, 720px); justify-content: center; }
 .form-wide { max-width: 720px; width: 100%; }
+.table-wrap { max-height: 52vh; }
 
 @media (max-width: 980px) {
   body { overflow: auto; }
   main { height: auto; min-height: 100vh; overflow: visible; }
-  .dashboard-shell { grid-template-columns: 1fr; height: auto; overflow: visible; padding-top: 18px; }
-  .dashboard-content { max-height: none; overflow: visible; padding-right: 0; }
-  .sidebar { position: static; display: flex; overflow-x: auto; border-radius: 22px; }
+  .app-shell { display: block; }
+  .app-shell .topbar { position: sticky; height: auto; }
+  .app-shell .nav { width: min(100% - 24px, 1440px); align-items: flex-start; flex-direction: column; }
+  .topbar-actions { width: 100%; justify-content: space-between; }
+  .app-layout { grid-template-columns: 1fr; height: auto; overflow: visible; margin: 0 auto; padding: 14px 0; width: min(100% - 24px, 1440px); }
+  .dashboard-content { height: auto; overflow: visible; padding-right: 0; }
+  .content-panel { padding: 18px; }
+  .sidebar { height: auto; display: flex; overflow-x: auto; border-radius: 22px; }
   .side-link { min-width: 170px; }
-  .overview-grid { grid-template-columns: repeat(2, 1fr); }
+  .overview-grid, .report-grid { grid-template-columns: repeat(2, 1fr); }
   .screen-header { flex-direction: column; }
+  .transaction-form-grid { grid-template-columns: 1fr; }
+  .card-head { flex-direction: column; }
 }
 @media (max-width: 640px) {
-  .overview-grid { grid-template-columns: 1fr; }
-  .nav-links.compact { max-width: 100%; overflow-x: auto; flex-wrap: nowrap; }
+  .overview-grid, .report-grid { grid-template-columns: 1fr; }
+  .topbar-actions { align-items: stretch; flex-direction: column; }
+  .card { padding: 18px; }
+  .settings-widget { right: 14px; bottom: 14px; }
+  .settings-button { width: 50px; height: 50px; }
 }
