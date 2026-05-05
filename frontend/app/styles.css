@@ -215,6 +215,10 @@ td button, td a, .mini-list button {
 .metric-card.alert { background: linear-gradient(135deg, #f97316, #dc2626); }
 .report-list { display: grid; gap: 10px; margin-top: 14px; }
 .report-list span { display: flex; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+.report-actions { justify-content: flex-end; margin-top: -4px; }
+.chart-list { display: grid; gap: 10px; margin: 14px 0 20px; }
+.chart-list span { display: grid; gap: 4px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+.chart-list em { color: var(--muted); font-style: normal; font-weight: 800; }
 
 /* Login */
 .login-shell { display: grid; place-items: center; padding: 24px; overflow: auto; background: linear-gradient(135deg, #061631, #0d6efd); }
