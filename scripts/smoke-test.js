@@ -63,14 +63,21 @@ async function ensureLocation(headers, warehouse) {
   const beforeQuantity = stockAtLocation(beforeStock);
 
   const inbound = await assertOk('Create inbound draft', () => request(`${API}/inbounds`, { method: 'POST', headers, body: JSON.stringify({ warehouseId: warehouse.id, supplierId: supplier.id, note: 'Smoke inbound', items: [{ productId: product.id, locationId: location.id, quantity: 10, unitPrice: 1000 }] }) }));
+  const cancelInbound = await assertOk('Create cancellable inbound draft', () => request(`${API}/inbounds`, { method: 'POST', headers, body: JSON.stringify({ warehouseId: warehouse.id, supplierId: supplier.id, note: 'Smoke cancel inbound', items: [{ productId: product.id, locationId: location.id, quantity: 1, unitPrice: 1000 }] }) }));
+  await assertOk('Cancel inbound draft', () => request(`${API}/inbounds/${cancelInbound.id}/cancel`, { method: 'POST', headers }));
   await assertOk('Confirm inbound', () => request(`${API}/inbounds/${inbound.id}/confirm`, { method: 'POST', headers }));
   const inboundQuantity = stockAtLocation(await request(`${API}/stock-levels?warehouseId=${warehouse.id}&productId=${product.id}`, { headers }));
   if (inboundQuantity < beforeQuantity + 10) throw new Error('Inbound did not increase stock at smoke location');
 
   const outbound = await assertOk('Create outbound draft', () => request(`${API}/outbounds`, { method: 'POST', headers, body: JSON.stringify({ warehouseId: warehouse.id, note: 'Smoke outbound', items: [{ productId: product.id, locationId: location.id, quantity: 2, unitPrice: 1000 }] }) }));
   await assertOk('Confirm outbound', () => request(`${API}/outbounds/${outbound.id}/confirm`, { method: 'POST', headers }));
+  await assertOk('Reject duplicate confirm', async () => {
+    try { await request(`${API}/outbounds/${outbound.id}/confirm`, { method: 'POST', headers }); } catch (error) { if (error.message.startsWith('409')) return true; throw error; }
+    throw new Error('Duplicate confirm unexpectedly succeeded');
+  });
   const outboundQuantity = stockAtLocation(await request(`${API}/stock-levels?warehouseId=${warehouse.id}&productId=${product.id}`, { headers }));
   if (outboundQuantity !== inboundQuantity - 2) throw new Error('Outbound did not decrease stock at smoke location');
+  await assertOk('Stock movements via Gateway', () => request(`${API}/stock-movements?warehouseId=${warehouse.id}&productId=${product.id}`, { headers }));
 
   await assertOk('Transactions via Gateway', () => request(`${API}/transactions`, { headers }));
   console.log('\nSmoke test passed. Demo is ready.');

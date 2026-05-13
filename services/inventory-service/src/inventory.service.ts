@@ -5,7 +5,31 @@ import { AdjustStockDto, CreateLocationDto, CreateWarehouseDto, UpdateLocationDt
 
 @Injectable()
 export class InventoryService {
-  constructor(@Inject(PG_POOL) private readonly db: Pool) {}
+  constructor(@Inject(PG_POOL) private readonly db: Pool) {
+    void this.ensureSchema();
+  }
+
+  private async ensureSchema() {
+    await this.db.query(`
+      CREATE TABLE IF NOT EXISTS stock_movements (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        product_id UUID NOT NULL,
+        warehouse_id UUID NOT NULL REFERENCES warehouses(id) ON DELETE CASCADE,
+        location_id UUID NULL REFERENCES warehouse_locations(id) ON DELETE SET NULL,
+        movement_type VARCHAR(30) NOT NULL CHECK (movement_type IN ('INBOUND', 'OUTBOUND', 'ADJUSTMENT')),
+        quantity_delta NUMERIC(14,2) NOT NULL,
+        quantity_after NUMERIC(14,2) NOT NULL CHECK (quantity_after >= 0),
+        reference_type VARCHAR(50),
+        reference_id UUID,
+        note TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(product_id);
+      CREATE INDEX IF NOT EXISTS idx_stock_movements_warehouse ON stock_movements(warehouse_id);
+      CREATE INDEX IF NOT EXISTS idx_stock_movements_reference ON stock_movements(reference_type, reference_id);
+      CREATE INDEX IF NOT EXISTS idx_stock_movements_created ON stock_movements(created_at);
+    `);
+  }
 
   private warehouse(row: any) {
     return { id: row.id, code: row.code, name: row.name, address: row.address, createdAt: row.created_at };
@@ -27,6 +51,38 @@ export class InventoryService {
       minQuantity: Number(row.min_quantity || 0),
       lastMovementAt: row.last_movement_at,
     };
+  }
+
+  private movement(row: any) {
+    return {
+      id: row.id,
+      productId: row.product_id,
+      warehouseId: row.warehouse_id,
+      warehouseCode: row.warehouse_code,
+      locationId: row.location_id,
+      locationCode: row.location_code,
+      movementType: row.movement_type,
+      quantityDelta: Number(row.quantity_delta || 0),
+      quantityAfter: Number(row.quantity_after || 0),
+      referenceType: row.reference_type,
+      referenceId: row.reference_id,
+      note: row.note,
+      createdAt: row.created_at,
+    };
+  }
+
+  private async assertLocationBelongsToWarehouse(warehouseId: string, locationId?: string | null) {
+    if (!locationId) return;
+    const location = await this.db.query('SELECT id FROM warehouse_locations WHERE id=$1 AND warehouse_id=$2', [locationId, warehouseId]);
+    if (!location.rowCount) throw new ConflictException('Location does not belong to selected warehouse');
+  }
+
+  private async recordMovement(input: { productId: string; warehouseId: string; locationId?: string | null; movementType: 'INBOUND' | 'OUTBOUND' | 'ADJUSTMENT'; quantityDelta: number; quantityAfter: number; referenceType?: string; referenceId?: string; note?: string }) {
+    await this.db.query(
+      `INSERT INTO stock_movements(product_id, warehouse_id, location_id, movement_type, quantity_delta, quantity_after, reference_type, reference_id, note)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [input.productId, input.warehouseId, input.locationId || null, input.movementType, input.quantityDelta, input.quantityAfter, input.referenceType || null, input.referenceId || null, input.note || null],
+    );
   }
 
   async listWarehouses() {
@@ -122,15 +178,22 @@ export class InventoryService {
   }
 
   async upsertStock(dto: UpsertStockDto) {
+    await this.assertLocationBelongsToWarehouse(dto.warehouseId, dto.locationId);
     try {
+      const current = await this.db.query('SELECT quantity FROM stock_levels WHERE product_id=$1 AND warehouse_id=$2 AND location_id IS NOT DISTINCT FROM $3', [dto.productId, dto.warehouseId, dto.locationId || null]);
+      const beforeQuantity = current.rowCount ? Number(current.rows[0].quantity || 0) : 0;
       const result = await this.db.query(
         `INSERT INTO stock_levels(product_id,warehouse_id,location_id,quantity,min_quantity,last_movement_at)
          VALUES($1,$2,$3,$4,$5,NOW())
          ON CONFLICT (product_id, warehouse_id, location_id)
          DO UPDATE SET quantity=EXCLUDED.quantity,min_quantity=EXCLUDED.min_quantity,last_movement_at=NOW()
-         RETURNING id`,
+         RETURNING id, quantity`,
         [dto.productId, dto.warehouseId, dto.locationId || null, dto.quantity, dto.minQuantity || 0],
       );
+      const afterQuantity = Number(result.rows[0].quantity || dto.quantity || 0);
+      if (afterQuantity !== beforeQuantity) {
+        await this.recordMovement({ productId: dto.productId, warehouseId: dto.warehouseId, locationId: dto.locationId, movementType: 'ADJUSTMENT', quantityDelta: afterQuantity - beforeQuantity, quantityAfter: afterQuantity, referenceType: 'manual', note: 'Manual stock upsert' });
+      }
       return (await this.listStock(dto.productId, dto.warehouseId)).find((item) => item.id === result.rows[0].id);
     } catch (error: any) {
       if (error?.code === '23503') throw new NotFoundException('Warehouse or location not found');
@@ -139,14 +202,30 @@ export class InventoryService {
   }
 
   async adjustStock(dto: AdjustStockDto) {
+    await this.assertLocationBelongsToWarehouse(dto.warehouseId, dto.locationId);
     const current = await this.db.query('SELECT * FROM stock_levels WHERE product_id=$1 AND warehouse_id=$2 AND location_id IS NOT DISTINCT FROM $3', [dto.productId, dto.warehouseId, dto.locationId || null]);
     if (!current.rowCount) {
+      if (dto.delta < 0) throw new ConflictException('Insufficient stock for outbound transaction');
       return this.upsertStock({ productId: dto.productId, warehouseId: dto.warehouseId, locationId: dto.locationId, quantity: dto.delta, minQuantity: 0 });
     }
     const nextQuantity = Number(current.rows[0].quantity) + dto.delta;
-    if (nextQuantity < 0) throw new ConflictException('Stock quantity cannot be negative');
+    if (nextQuantity < 0) throw new ConflictException('Insufficient stock for outbound transaction');
     await this.db.query('UPDATE stock_levels SET quantity=$1,last_movement_at=NOW() WHERE id=$2', [nextQuantity, current.rows[0].id]);
+    await this.recordMovement({ productId: dto.productId, warehouseId: dto.warehouseId, locationId: dto.locationId, movementType: dto.delta >= 0 ? 'INBOUND' : 'OUTBOUND', quantityDelta: dto.delta, quantityAfter: nextQuantity, referenceType: 'transaction', note: 'Transaction stock adjustment' });
     return (await this.listStock(dto.productId, dto.warehouseId)).find((item) => item.id === current.rows[0].id);
+  }
+
+  async listMovements(productId?: string, warehouseId?: string) {
+    const where: string[] = [];
+    const params: any[] = [];
+    if (productId) { params.push(productId); where.push('m.product_id=$' + params.length); }
+    if (warehouseId) { params.push(warehouseId); where.push('m.warehouse_id=$' + params.length); }
+    const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
+    const result = await this.db.query(
+      `SELECT m.*, w.code AS warehouse_code, l.code AS location_code FROM stock_movements m JOIN warehouses w ON w.id=m.warehouse_id LEFT JOIN warehouse_locations l ON l.id=m.location_id ${whereSql} ORDER BY m.created_at DESC LIMIT 200`,
+      params,
+    );
+    return result.rows.map((row) => this.movement(row));
   }
 
   async lowStockAlerts(productId?: string, warehouseId?: string) {

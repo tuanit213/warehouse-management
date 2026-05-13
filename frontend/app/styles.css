@@ -221,6 +221,58 @@ td button, td a, .mini-list button {
 .chart-list { display: grid; gap: 10px; margin: 14px 0 20px; }
 .chart-list span { display: grid; gap: 4px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
 .chart-list em { color: var(--muted); font-style: normal; font-weight: 800; }
+.subsection-title { margin: 18px 0 10px; font-size: 18px; }
+.action-cell { display: flex; gap: 8px; flex-wrap: wrap; }
+.movement-list { display: grid; gap: 8px; margin-top: 10px; }
+.movement-row, .movement-empty {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+}
+.movement-row em { color: var(--muted); font-style: normal; font-size: 12px; }
+.movement-row strong { color: #166534; }
+.movement-row.minus strong { color: #991b1b; }
+.movement-empty { display: block; color: var(--muted); }
+.toast-stack { position: fixed; right: 22px; top: 88px; z-index: 80; display: grid; gap: 10px; width: min(360px, calc(100vw - 32px)); }
+.toast {
+  padding: 13px 15px;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 18px 45px rgba(15, 23, 42, .18);
+  font-weight: 900;
+}
+.toast.success { border-color: #86efac; color: #166534; }
+.toast.error { border-color: #fecaca; color: #991b1b; }
+.toast.info { border-color: #bfdbfe; color: #1d4ed8; }
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(2, 6, 23, .48);
+  backdrop-filter: blur(10px);
+}
+.confirm-modal {
+  width: min(460px, 100%);
+  padding: 24px;
+  border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+  border-radius: 28px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 30px 90px rgba(0,0,0,.32);
+}
+.confirm-modal h2 { margin: 4px 0 8px; }
+.confirm-modal p { color: var(--muted); line-height: 1.6; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 
 /* Login */
 .login-shell { display: grid; place-items: center; padding: 24px; overflow: auto; background: linear-gradient(135deg, #061631, #0d6efd); }

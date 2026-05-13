@@ -143,7 +143,7 @@ export class TransactionService {
 
   async confirmTransaction(id: string) {
     const transaction = await this.getTransaction(id);
-    if (transaction.status === 'CONFIRMED') return transaction;
+    if (transaction.status === 'CONFIRMED') throw new ConflictException('Transaction is already confirmed');
     if (transaction.status !== 'DRAFT') throw new ConflictException('Only DRAFT transactions can be confirmed');
 
     for (const item of transaction.items) {
@@ -155,6 +155,14 @@ export class TransactionService {
     }
 
     await this.db.query('UPDATE stock_transactions SET status=$1, confirmed_at=NOW(), updated_at=NOW() WHERE id=$2', ['CONFIRMED', id]);
+    return this.getTransaction(id);
+  }
+
+  async cancelTransaction(id: string) {
+    const transaction = await this.getTransaction(id);
+    if (transaction.status === 'CONFIRMED') throw new ConflictException('Confirmed transactions cannot be cancelled');
+    if (transaction.status === 'CANCELLED') throw new ConflictException('Transaction is already cancelled');
+    await this.db.query('UPDATE stock_transactions SET status=$1, updated_at=NOW() WHERE id=$2', ['CANCELLED', id]);
     return this.getTransaction(id);
   }
 

@@ -33,11 +33,17 @@ export class AppController {
   @Post('transactions/:id/confirm')
   confirmTransaction(@Param('id') id: string) { return this.transactions.confirmTransaction(id); }
 
+  @Post('transactions/:id/cancel')
+  cancelTransaction(@Param('id') id: string) { return this.transactions.cancelTransaction(id); }
+
   @Post('inbounds')
   createInbound(@Body() dto: CreateTransactionDto) { return this.transactions.createInbound(dto); }
 
   @Post('inbounds/:id/confirm')
   confirmInbound(@Param('id') id: string) { return this.transactions.confirmTransaction(id); }
+
+  @Post('inbounds/:id/cancel')
+  cancelInbound(@Param('id') id: string) { return this.transactions.cancelTransaction(id); }
 
   @Get('inbounds/:id/pdf')
   async inboundPdf(@Param('id') id: string, @Res() res: any) {
@@ -52,4 +58,7 @@ export class AppController {
 
   @Post('outbounds/:id/confirm')
   confirmOutbound(@Param('id') id: string) { return this.transactions.confirmTransaction(id); }
+
+  @Post('outbounds/:id/cancel')
+  cancelOutbound(@Param('id') id: string) { return this.transactions.cancelTransaction(id); }
 }

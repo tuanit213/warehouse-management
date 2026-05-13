@@ -54,6 +54,9 @@ export class AppController {
   @Get('stock-alerts/aging')
   agingAlerts(@Query('warehouseId') warehouseId?: string, @Query('days') days?: string) { return this.inventory.agingAlerts(warehouseId, days ? Number(days) : undefined); }
 
+  @Get('stock-movements')
+  listMovements(@Query('productId') productId?: string, @Query('warehouseId') warehouseId?: string) { return this.inventory.listMovements(productId, warehouseId); }
+
   @Post('stock-levels')
   upsertStock(@Body() dto: UpsertStockDto) { return this.inventory.upsertStock(dto); }
 

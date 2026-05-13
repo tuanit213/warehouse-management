@@ -10,6 +10,7 @@ const serviceMap: Record<string, string> = {
   locations: 'http://inventory-service:3003/api',
   'stock-levels': 'http://inventory-service:3003/api',
   'stock-alerts': 'http://inventory-service:3003/api',
+  'stock-movements': 'http://inventory-service:3003/api',
   transactions: 'http://transaction-service:3004/api',
   transaction: 'http://transaction-service:3004/api',
   suppliers: 'http://transaction-service:3004/api',
@@ -35,7 +36,7 @@ type Rule = { methods?: string[]; roles: Role[] };
 const rbacRules: Array<{ pattern: RegExp; rules: Rule[] }> = [
   { pattern: /^\/auth\/users(?:\/.*)?$/, rules: [{ roles: ['ADMIN'] }] },
   { pattern: /^\/reports?(?:\/.*)?$/, rules: [{ roles: ['ADMIN', 'MANAGER'] }] },
-  { pattern: /^\/(?:inventory|warehouses|locations|stock-levels|stock-alerts)(?:\/.*)?$/, rules: [{ methods: ['GET'], roles: ['ADMIN', 'MANAGER', 'WAREHOUSE_STAFF'] }, { roles: ['ADMIN', 'WAREHOUSE_STAFF'] }] },
+  { pattern: /^\/(?:inventory|warehouses|locations|stock-levels|stock-alerts|stock-movements)(?:\/.*)?$/, rules: [{ methods: ['GET'], roles: ['ADMIN', 'MANAGER', 'WAREHOUSE_STAFF'] }, { roles: ['ADMIN', 'WAREHOUSE_STAFF'] }] },
   { pattern: /^\/(?:transactions?|suppliers|inbounds|outbounds)(?:\/.*)?$/, rules: [{ methods: ['GET'], roles: ['ADMIN', 'MANAGER', 'WAREHOUSE_STAFF'] }, { roles: ['ADMIN', 'MANAGER', 'WAREHOUSE_STAFF'] }] },
   { pattern: /^\/products?(?:\/.*)?$/, rules: [{ methods: ['GET'], roles: ['ADMIN', 'MANAGER', 'WAREHOUSE_STAFF'] }, { roles: ['ADMIN', 'MANAGER'] }] },
   { pattern: /^\/categories(?:\/.*)?$/, rules: [{ methods: ['GET'], roles: ['ADMIN', 'MANAGER', 'WAREHOUSE_STAFF'] }, { roles: ['ADMIN', 'MANAGER'] }] },

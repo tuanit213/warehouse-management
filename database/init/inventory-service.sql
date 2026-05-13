@@ -28,6 +28,20 @@ CREATE TABLE IF NOT EXISTS stock_levels (
   UNIQUE (product_id, warehouse_id, location_id)
 );
 
+CREATE TABLE IF NOT EXISTS stock_movements (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  product_id UUID NOT NULL,
+  warehouse_id UUID NOT NULL REFERENCES warehouses(id) ON DELETE CASCADE,
+  location_id UUID NULL REFERENCES warehouse_locations(id) ON DELETE SET NULL,
+  movement_type VARCHAR(30) NOT NULL CHECK (movement_type IN ('INBOUND', 'OUTBOUND', 'ADJUSTMENT')),
+  quantity_delta NUMERIC(14,2) NOT NULL,
+  quantity_after NUMERIC(14,2) NOT NULL CHECK (quantity_after >= 0),
+  reference_type VARCHAR(50),
+  reference_id UUID,
+  note TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_stock_quantity_nonnegative') THEN
@@ -43,6 +57,10 @@ CREATE INDEX IF NOT EXISTS idx_stock_levels_product ON stock_levels(product_id);
 CREATE INDEX IF NOT EXISTS idx_stock_levels_warehouse ON stock_levels(warehouse_id);
 CREATE INDEX IF NOT EXISTS idx_stock_levels_location ON stock_levels(location_id);
 CREATE INDEX IF NOT EXISTS idx_stock_levels_last_movement ON stock_levels(last_movement_at);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(product_id);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_warehouse ON stock_movements(warehouse_id);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_reference ON stock_movements(reference_type, reference_id);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_created ON stock_movements(created_at);
 
 INSERT INTO warehouses (id, code, name, address) VALUES
   ('11111111-1111-1111-1111-111111111111', 'WH-HCM', 'Kho Hồ Chí Minh', 'Khu công nghiệp Tân Bình, TP.HCM'),
