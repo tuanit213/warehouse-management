@@ -38,24 +38,34 @@ Response:
 - GET/POST/PATCH/DELETE /warehouses
 - GET/POST/PATCH/DELETE /warehouses/:id/locations
 - GET /stock-levels?warehouseId=&productId=
+- POST /stock-levels
+- POST /stock-levels/adjust
 - GET /stock-alerts/low-stock
 - GET /stock-alerts/aging
+- GET /stock-movements?warehouseId=&productId=
 
 ## Transaction Service
 
 - GET /transactions?type=&status=
 - GET /transactions/:id
+- POST /transactions/:id/confirm
+- POST /transactions/:id/cancel
 - POST /inbounds
 - POST /inbounds/:id/confirm
+- POST /inbounds/:id/cancel
 - GET /inbounds/:id/pdf
 - POST /outbounds
 - POST /outbounds/:id/confirm
+- POST /outbounds/:id/cancel
 - GET/POST/PATCH/DELETE /suppliers
 
 ## Report Service
 
 - GET /reports/dashboard
+- GET /reports/summary
 - GET /reports/inventory-value
+- GET /reports/low-stock
+- GET /reports/stock-movements?warehouseId=&productId=
 - GET /reports/inout-chart?from=&to=
-- GET /reports/export/excel
+- GET /reports/export/excel?kind=inventory|low-stock|movements
 - GET /reports/export/pdf

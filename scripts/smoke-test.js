@@ -78,6 +78,10 @@ async function ensureLocation(headers, warehouse) {
   const outboundQuantity = stockAtLocation(await request(`${API}/stock-levels?warehouseId=${warehouse.id}&productId=${product.id}`, { headers }));
   if (outboundQuantity !== inboundQuantity - 2) throw new Error('Outbound did not decrease stock at smoke location');
   await assertOk('Stock movements via Gateway', () => request(`${API}/stock-movements?warehouseId=${warehouse.id}&productId=${product.id}`, { headers }));
+  await assertOk('Report summary via Gateway', () => request(`${API}/reports/summary`, { headers }));
+  await assertOk('Report low stock via Gateway', () => request(`${API}/reports/low-stock`, { headers }));
+  await assertOk('Report stock movements via Gateway', () => request(`${API}/reports/stock-movements`, { headers }));
+  await assertOk('Report movement export via Gateway', () => request(`${API}/reports/export/excel?kind=movements`, { headers }));
 
   await assertOk('Transactions via Gateway', () => request(`${API}/transactions`, { headers }));
   console.log('\nSmoke test passed. Demo is ready.');

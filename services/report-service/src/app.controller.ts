@@ -1,4 +1,4 @@
-import { Controller, Get, Header, Query } from '@nestjs/common';
+import { Controller, Get, Header, Query, Res } from '@nestjs/common';
 import { ReportService } from './report.service';
 
 @Controller('reports')
@@ -10,9 +10,24 @@ export class AppController {
     return this.reports.dashboard();
   }
 
+  @Get('summary')
+  summary() {
+    return this.reports.operationalSummary();
+  }
+
   @Get('inventory-value')
   inventoryValue() {
     return this.reports.inventoryValue();
+  }
+
+  @Get('low-stock')
+  lowStock() {
+    return this.reports.lowStock();
+  }
+
+  @Get('stock-movements')
+  stockMovements(@Query('productId') productId?: string, @Query('warehouseId') warehouseId?: string) {
+    return this.reports.stockMovements(productId, warehouseId);
   }
 
   @Get('inout-chart')
@@ -22,15 +37,15 @@ export class AppController {
 
   @Get('export/excel')
   @Header('content-type', 'text/csv; charset=utf-8')
-  @Header('content-disposition', 'attachment; filename="wms-inventory-report.csv"')
-  exportExcel() {
-    return this.reports.exportCsv();
+  exportExcel(@Query('kind') kind?: 'inventory' | 'low-stock' | 'movements') {
+    return this.reports.exportCsv(kind || 'inventory');
   }
 
   @Get('export/pdf')
-  @Header('content-type', 'application/pdf')
-  @Header('content-disposition', 'attachment; filename="wms-report.pdf"')
-  exportPdf() {
-    return this.reports.exportPdfText();
+  async exportPdf(@Res() res: any) {
+    const pdf = await this.reports.exportPdfBuffer();
+    res.setHeader('content-type', 'application/pdf');
+    res.setHeader('content-disposition', 'attachment; filename="wms-report.pdf"');
+    return res.send(pdf);
   }
 }
