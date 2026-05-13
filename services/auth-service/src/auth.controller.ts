@@ -1,10 +1,14 @@
 import { Body, Controller, Get, Headers, Param, Patch, Post, UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { ChangePasswordDto, LoginDto, RegisterDto, UpdateRoleDto } from './dto';
+import { ChangePasswordDto, LoginDto, LogoutDto, RefreshTokenDto, RegisterDto, UpdateRoleDto } from './dto';
 
 function bearer(auth?: string) {
   if (!auth?.startsWith('Bearer ')) throw new UnauthorizedException('Missing bearer token');
   return auth.slice('Bearer '.length);
+}
+
+function optionalBearer(auth?: string) {
+  return auth?.startsWith('Bearer ') ? auth.slice('Bearer '.length) : undefined;
 }
 
 @Controller('auth')
@@ -16,6 +20,14 @@ export class AuthController {
 
   @Post('login')
   login(@Body() dto: LoginDto) { return this.auth.login(dto); }
+
+  @Post('refresh')
+  refresh(@Body() dto: RefreshTokenDto) { return this.auth.refresh(dto); }
+
+  @Post('logout')
+  logout(@Headers('authorization') authorization: string | undefined, @Body() dto: LogoutDto) {
+    return this.auth.logout(optionalBearer(authorization), dto || {});
+  }
 
   @Post('verify')
   verify(@Headers('authorization') authorization?: string) { return this.auth.verifyToken(bearer(authorization)); }

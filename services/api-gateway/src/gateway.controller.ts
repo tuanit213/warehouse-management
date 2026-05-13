@@ -19,8 +19,8 @@ const serviceMap: Record<string, string> = {
   report: 'http://report-service:3005/api',
 };
 
-const publicPaths = ['/auth/login', '/auth/register'];
-const rateLimitedPaths = new Set(publicPaths);
+const publicPaths = ['/auth/login', '/auth/register', '/auth/refresh'];
+const rateLimitedPaths = new Set(['/auth/login', '/auth/register', '/auth/refresh', '/auth/logout']);
 const authAttempts = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = 20;

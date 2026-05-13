@@ -27,6 +27,19 @@ export class LoginDto {
   password!: string;
 }
 
+export class RefreshTokenDto {
+  @IsString()
+  @MinLength(32)
+  refreshToken!: string;
+}
+
+export class LogoutDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(32)
+  refreshToken?: string;
+}
+
 export class ChangePasswordDto {
   @IsString()
   oldPassword!: string;
