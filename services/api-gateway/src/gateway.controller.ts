@@ -20,6 +20,14 @@ const serviceMap: Record<string, string> = {
   report: 'http://report-service:3005/api',
 };
 
+const downstreamServices = [
+  ['auth-service', 'http://auth-service:3001/api/health'],
+  ['product-service', 'http://product-service:3002/api/health'],
+  ['inventory-service', 'http://inventory-service:3003/api/health'],
+  ['transaction-service', 'http://transaction-service:3004/api/health'],
+  ['report-service', 'http://report-service:3005/api/health'],
+] as const;
+
 const publicPaths = ['/auth/login', '/auth/register', '/auth/refresh'];
 const rateLimitedPaths = new Set(['/auth/login', '/auth/register', '/auth/refresh', '/auth/logout']);
 const authAttempts = new Map<string, { count: number; resetAt: number }>();
@@ -57,6 +65,10 @@ export class GatewayController {
     const correlationId = this.correlationId(req, res);
     if (pathOnly === '/health') {
       return res.status(200).json({ service: 'api-gateway', status: 'ok', correlationId, timestamp: new Date().toISOString() });
+    }
+    if (pathOnly === '/health/ready') {
+      const readiness = await this.readiness();
+      return res.status(readiness.status === 'ok' ? 200 : 503).json({ ...readiness, correlationId });
     }
     const [, first] = pathOnly.split('/');
     const base = serviceMap[first];
@@ -99,6 +111,19 @@ export class GatewayController {
     const text = await response.text();
     const contentType = response.headers.get('content-type') || 'application/json';
     res.status(response.status).type(contentType).send(text);
+  }
+
+  private async readiness() {
+    const checks = await Promise.all(downstreamServices.map(async ([service, url]) => {
+      try {
+        const response = await fetch(url, { signal: AbortSignal.timeout(2_000) });
+        return { service, status: response.ok ? 'ok' : 'error', httpStatus: response.status };
+      } catch (error: any) {
+        return { service, status: 'error', error: error?.message || 'unreachable' };
+      }
+    }));
+    const status = checks.every((item) => item.status === 'ok') ? 'ok' : 'degraded';
+    return { service: 'api-gateway', status, checks, timestamp: new Date().toISOString() };
   }
 
   private correlationId(req: any, res: any) {

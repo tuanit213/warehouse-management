@@ -1,0 +1,55 @@
+name: WMS CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --workspaces --include-workspace-root
+
+      - name: Validate Docker Compose
+        run: docker compose config
+
+      - name: Build workspaces
+        run: npm run build --workspaces
+
+      - name: Regression tests
+        run: npm run test:regression
+
+      - name: Start stack
+        run: docker compose up -d --build
+
+      - name: Wait for Gateway readiness
+        run: |
+          for i in {1..30}; do
+            node scripts/health-check.js && exit 0
+            sleep 5
+          done
+          docker compose logs --tail=200
+          exit 1
+
+      - name: Smoke test
+        run: npm run smoke:test
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs --tail=250
+
+      - name: Stop stack
+        if: always()
+        run: docker compose down

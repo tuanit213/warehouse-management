@@ -39,6 +39,7 @@ async function ensureLocation(headers, warehouse) {
 (async () => {
   await assertOk('Frontend responds', () => request(FRONTEND));
   await assertOk('API Gateway health', () => request(`${API}/health`));
+  await assertOk('API Gateway readiness', () => request(`${API}/health/ready`));
   const login = await assertOk('Demo admin login', () => request(`${API}/auth/login`, { method: 'POST', body: JSON.stringify({ email, password }) }));
   const refreshed = await assertOk('Auth refresh token rotation', () => request(`${API}/auth/refresh`, { method: 'POST', body: JSON.stringify({ refreshToken: login.refreshToken }) }));
   const headers = { authorization: `Bearer ${refreshed.accessToken}` };

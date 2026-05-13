@@ -9,6 +9,13 @@
     "check": "docker compose config",
     "seed:demo": "node scripts/seed-demo-data.js",
     "smoke:test": "node scripts/smoke-test.js",
+    "health:check": "node scripts/health-check.js",
+    "test:rbac": "node scripts/rbac-regression-test.js",
+    "test:inventory": "node scripts/inventory-regression-test.js",
+    "test:transactions": "node scripts/transaction-regression-test.js",
+    "test:regression": "npm run test:rbac && npm run test:inventory && npm run test:transactions",
+    "prod:env:check": "node scripts/validate-production-env.js",
+    "prod:config": "docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.prod.yml config",
     "demo:ready": "npm run compose:up && npm run seed:demo && npm run smoke:test"
   },
   "workspaces": [
