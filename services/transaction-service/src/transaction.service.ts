@@ -168,8 +168,89 @@ export class TransactionService {
 
   async pdf(id: string) {
     const transaction = await this.getTransaction(id);
-    const body = `Transaction ${transaction.code}\nType: ${transaction.type}\nStatus: ${transaction.status}\nTotal quantity: ${transaction.totalQuantity}`;
-    return Buffer.from(`%PDF-1.4\n1 0 obj<<>>endobj\n2 0 obj<< /Length ${body.length} >>stream\n${body}\nendstream\nendobj\ntrailer<<>>\n%%EOF`);
+    if (transaction.type !== 'INBOUND') throw new BadRequestException('PDF export is only available for inbound transactions');
+    const supplier = transaction.supplierId ? await this.db.query('SELECT code, name, contact_name, phone, email, address FROM suppliers WHERE id=$1', [transaction.supplierId]) : null;
+    const lines = [
+      'WAREHOUSE MANAGEMENT SYSTEM',
+      'INBOUND VOUCHER',
+      '',
+      `Voucher: ${transaction.code}`,
+      `Status: ${transaction.status}`,
+      `Created at: ${this.formatDate(transaction.createdAt)}`,
+      `Confirmed at: ${this.formatDate(transaction.confirmedAt)}`,
+      `Warehouse ID: ${transaction.warehouseId}`,
+      `Supplier: ${supplier?.rows[0] ? `${supplier.rows[0].code} - ${supplier.rows[0].name}` : transaction.supplierId || '-'}`,
+      `Note: ${transaction.note || '-'}`,
+      '',
+      'ITEMS',
+      'No.  Product ID                            Location ID                           Qty        Unit price      Amount',
+      ...transaction.items.map((item, index) => {
+        const amount = Number(item.quantity || 0) * Number(item.unitPrice || 0);
+        return [
+          String(index + 1).padEnd(4),
+          String(item.productId).padEnd(37),
+          String(item.locationId || '-').padEnd(37),
+          this.money(item.quantity).padStart(8),
+          this.money(item.unitPrice).padStart(15),
+          this.money(amount).padStart(12),
+        ].join(' ');
+      }),
+      '',
+      `Total quantity: ${this.money(transaction.totalQuantity)}`,
+      `Total value: ${this.money(transaction.totalValue)}`,
+      '',
+      'Prepared by                         Checked by                          Approved by',
+      '',
+      '',
+      '____________________                ____________________                ____________________',
+    ];
+    return this.simplePdf(lines);
+  }
+
+  private formatDate(value?: string | null) {
+    if (!value) return '-';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? '-' : date.toISOString().replace('T', ' ').slice(0, 19);
+  }
+
+  private money(value: number | string) {
+    return Number(value || 0).toLocaleString('vi-VN');
+  }
+
+  private simplePdf(lines: string[]) {
+    const content = [
+      'BT',
+      '/F1 10 Tf',
+      '50 790 Td',
+      ...lines.flatMap((line, index) => [`(${this.pdfText(line)}) Tj`, index === lines.length - 1 ? '' : '0 -14 Td']).filter(Boolean),
+      'ET',
+    ].join('\n');
+    const objects = [
+      '1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj',
+      '2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj',
+      '3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 842 595] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>endobj',
+      '4 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj',
+      `5 0 obj<< /Length ${Buffer.byteLength(content)} >>stream\n${content}\nendstream\nendobj`,
+    ];
+    let offset = `%PDF-1.4\n`.length;
+    const xref = ['xref', `0 ${objects.length + 1}`, '0000000000 65535 f '];
+    const body = objects.map((object) => {
+      xref.push(`${String(offset).padStart(10, '0')} 00000 n `);
+      offset += Buffer.byteLength(object + '\n');
+      return object;
+    }).join('\n') + '\n';
+    const xrefOffset = Buffer.byteLength(`%PDF-1.4\n${body}`);
+    return Buffer.from(`%PDF-1.4\n${body}${xref.join('\n')}\ntrailer<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
+  }
+
+  private pdfText(value: string) {
+    return value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^\x20-\x7E]/g, '')
+      .replace(/\\/g, '\\\\')
+      .replace(/\(/g, '\\(')
+      .replace(/\)/g, '\\)');
   }
 
   private async upsertStock(warehouseId: string, productId: string, locationId: string | null, quantity: number) {

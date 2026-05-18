@@ -11,6 +11,7 @@ Hệ thống quản lý kho hàng cho doanh nghiệp vừa và nhỏ, thiết k�
 - Message queue: RabbitMQ
 - Container: Docker Compose
 - Production readiness: health/readiness checks, smoke tests, GitHub Actions CI
+- Docker runtime: production builds for Frontend and NestJS services
 
 ## Services
 
@@ -31,6 +32,7 @@ docker compose up --build
 
 - Frontend: http://localhost:3006
 - API Gateway: http://localhost:3000/api
+- Frontend Health: http://localhost:3006/api/health
 - Health: http://localhost:3000/api/health
 - Readiness: http://localhost:3000/api/health/ready
 - RabbitMQ UI: http://localhost:15672 (guest/guest)
@@ -43,6 +45,8 @@ npm run test:regression
 npm run smoke:test
 ```
 
+`npm run test:regression` also includes a static quality check for Docker runtime mode and mojibake text.
+
 ## Triển khai production
 
 ```bash
@@ -51,6 +55,12 @@ docker compose --env-file .env.production -f docker-compose.yml -f docker-compos
 ```
 
 Trước khi chạy thật, thay toàn bộ secret/password trong `.env.production`.
+
+Backup trước khi deploy hoặc nâng cấp:
+
+```bash
+npm run prod:backup
+```
 
 ## Tài liệu đồ án
 
@@ -62,4 +72,5 @@ Trước khi chạy thật, thay toàn bộ secret/password trong `.env.producti
 - `docs/PRODUCTION_NOTES.md`
 - `docs/OBSERVABILITY.md`
 - `docs/DEPLOYMENT.md`
+- `docs/BACKUP_RESTORE.md`
 - `docs/TESTING.md`

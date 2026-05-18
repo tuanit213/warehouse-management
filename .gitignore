@@ -10,3 +10,4 @@ coverage
 postgres-data
 rabbitmq-data
 redis-data
+backups

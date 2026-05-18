@@ -1,11 +1,29 @@
-import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { Pool } from 'pg';
 import { PG_POOL } from './database';
 import { CreateCategoryDto, CreateProductDto, ProductQueryDto, UpdateCategoryDto, UpdateProductDto } from './dto';
 
 @Injectable()
-export class ProductService {
+export class ProductService implements OnModuleInit {
   constructor(@Inject(PG_POOL) private readonly db: Pool) {}
+
+  async onModuleInit() {
+    await this.db.query(`
+      ALTER TABLE products
+        ADD COLUMN IF NOT EXISTS barcode VARCHAR(120),
+        ADD COLUMN IF NOT EXISTS color VARCHAR(80),
+        ADD COLUMN IF NOT EXISTS size VARCHAR(80),
+        ADD COLUMN IF NOT EXISTS sale_price NUMERIC(14,2) DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS warehouse_id UUID,
+        ADD COLUMN IF NOT EXISTS location_id UUID,
+        ADD COLUMN IF NOT EXISTS quantity_imported NUMERIC(14,2) DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS supplier_id UUID,
+        ADD COLUMN IF NOT EXISTS imported_at DATE,
+        ADD COLUMN IF NOT EXISTS note TEXT,
+        ADD COLUMN IF NOT EXISTS image_url TEXT
+    `);
+    await this.db.query('CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode)');
+  }
 
   private product(row: any) {
     if (!row) return null;
@@ -18,6 +36,17 @@ export class ProductService {
       categoryId: row.category_id,
       categoryName: row.category_name,
       costPrice: Number(row.cost_price || 0),
+      barcode: row.barcode,
+      color: row.color,
+      size: row.size,
+      salePrice: Number(row.sale_price || 0),
+      warehouseId: row.warehouse_id,
+      locationId: row.location_id,
+      quantityImported: Number(row.quantity_imported || 0),
+      supplierId: row.supplier_id,
+      importedAt: row.imported_at,
+      note: row.note,
+      imageUrl: row.image_url,
       createdAt: row.created_at,
     };
   }
@@ -35,7 +64,7 @@ export class ProductService {
     const params: any[] = [];
     if (query.keyword) {
       params.push('%' + query.keyword.toLowerCase() + '%');
-      where.push('(lower(p.sku) LIKE $' + params.length + ' OR lower(p.name) LIKE $' + params.length + ')');
+      where.push('(lower(p.sku) LIKE $' + params.length + ' OR lower(p.name) LIKE $' + params.length + ' OR lower(coalesce(p.barcode, \'\')) LIKE $' + params.length + ')');
     }
     if (query.categoryId) {
       params.push(query.categoryId);
@@ -62,8 +91,29 @@ export class ProductService {
   async createProduct(dto: CreateProductDto) {
     try {
       const result = await this.db.query(
-        'INSERT INTO products(sku,name,description,unit,category_id,cost_price) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
-        [dto.sku, dto.name, dto.description || null, dto.unit, dto.categoryId || null, dto.costPrice || 0],
+        `INSERT INTO products(
+          sku,name,description,unit,category_id,cost_price,barcode,color,size,sale_price,
+          warehouse_id,location_id,quantity_imported,supplier_id,imported_at,note,image_url
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
+        [
+          dto.sku,
+          dto.name,
+          dto.description || null,
+          dto.unit,
+          dto.categoryId || null,
+          dto.costPrice || 0,
+          dto.barcode || null,
+          dto.color || null,
+          dto.size || null,
+          dto.salePrice || 0,
+          dto.warehouseId || null,
+          dto.locationId || null,
+          dto.quantityImported || 0,
+          dto.supplierId || null,
+          dto.importedAt || null,
+          dto.note || null,
+          dto.imageUrl || null,
+        ],
       );
       return this.getProduct(result.rows[0].id);
     } catch (error: any) {
@@ -77,8 +127,31 @@ export class ProductService {
     const next = { ...current, ...dto } as any;
     try {
       const result = await this.db.query(
-        'UPDATE products SET sku=$1,name=$2,description=$3,unit=$4,category_id=$5,cost_price=$6 WHERE id=$7 RETURNING id',
-        [next.sku, next.name, next.description || null, next.unit, next.categoryId || null, next.costPrice || 0, id],
+        `UPDATE products SET
+          sku=$1,name=$2,description=$3,unit=$4,category_id=$5,cost_price=$6,
+          barcode=$7,color=$8,size=$9,sale_price=$10,warehouse_id=$11,location_id=$12,
+          quantity_imported=$13,supplier_id=$14,imported_at=$15,note=$16,image_url=$17
+        WHERE id=$18 RETURNING id`,
+        [
+          next.sku,
+          next.name,
+          next.description || null,
+          next.unit,
+          next.categoryId || null,
+          next.costPrice || 0,
+          next.barcode || null,
+          next.color || null,
+          next.size || null,
+          next.salePrice || 0,
+          next.warehouseId || null,
+          next.locationId || null,
+          next.quantityImported || 0,
+          next.supplierId || null,
+          next.importedAt || null,
+          next.note || null,
+          next.imageUrl || null,
+          id,
+        ],
       );
       if (!result.rowCount) throw new NotFoundException('Product not found');
       return this.getProduct(id);

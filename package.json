@@ -13,13 +13,22 @@
     "test:rbac": "node scripts/rbac-regression-test.js",
     "test:inventory": "node scripts/inventory-regression-test.js",
     "test:transactions": "node scripts/transaction-regression-test.js",
-    "test:regression": "npm run test:rbac && npm run test:inventory && npm run test:transactions",
+    "test:quality": "node scripts/static-quality-check.js",
+    "test:regression": "npm run test:quality && npm run test:rbac && npm run test:inventory && npm run test:transactions",
     "prod:env:check": "node scripts/validate-production-env.js",
     "prod:config": "docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.prod.yml config",
+    "prod:backup": "powershell -ExecutionPolicy Bypass -File scripts/backup-production.ps1",
+    "prod:restore": "powershell -ExecutionPolicy Bypass -File scripts/restore-production.ps1",
     "demo:ready": "npm run compose:up && npm run seed:demo && npm run smoke:test"
   },
   "workspaces": [
     "frontend",
     "services/*"
-  ]
+  ],
+  "overrides": {
+    "postcss": "8.5.10",
+    "next": {
+      "postcss": "8.5.10"
+    }
+  }
 }

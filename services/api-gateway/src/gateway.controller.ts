@@ -108,9 +108,14 @@ export class GatewayController {
     } catch (error: any) {
       throw new HttpException({ message: 'Gateway proxy failed', targetUrl, correlationId, cause: error?.cause?.message || error?.message }, 502);
     }
-    const text = await response.text();
     const contentType = response.headers.get('content-type') || 'application/json';
-    res.status(response.status).type(contentType).send(text);
+    const contentDisposition = response.headers.get('content-disposition');
+    if (contentDisposition) res.setHeader('content-disposition', contentDisposition);
+    res.status(response.status).type(contentType);
+    if (contentType.includes('application/json') || contentType.startsWith('text/')) {
+      return res.send(await response.text());
+    }
+    return res.send(Buffer.from(await response.arrayBuffer()));
   }
 
   private async readiness() {

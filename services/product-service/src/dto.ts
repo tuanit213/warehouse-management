@@ -43,6 +43,54 @@ export class CreateProductDto {
   @IsNumber()
   @Min(0)
   costPrice?: number;
+
+  @IsOptional()
+  @IsString()
+  barcode?: string;
+
+  @IsOptional()
+  @IsString()
+  color?: string;
+
+  @IsOptional()
+  @IsString()
+  size?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  salePrice?: number;
+
+  @IsOptional()
+  @IsUUID()
+  warehouseId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  locationId?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  quantityImported?: number;
+
+  @IsOptional()
+  @IsUUID()
+  supplierId?: string;
+
+  @IsOptional()
+  @IsString()
+  importedAt?: string;
+
+  @IsOptional()
+  @IsString()
+  note?: string;
+
+  @IsOptional()
+  @IsString()
+  imageUrl?: string;
 }
 
 export class UpdateProductDto {
@@ -71,6 +119,54 @@ export class UpdateProductDto {
   @IsNumber()
   @Min(0)
   costPrice?: number;
+
+  @IsOptional()
+  @IsString()
+  barcode?: string;
+
+  @IsOptional()
+  @IsString()
+  color?: string;
+
+  @IsOptional()
+  @IsString()
+  size?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  salePrice?: number;
+
+  @IsOptional()
+  @IsUUID()
+  warehouseId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  locationId?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  quantityImported?: number;
+
+  @IsOptional()
+  @IsUUID()
+  supplierId?: string;
+
+  @IsOptional()
+  @IsString()
+  importedAt?: string;
+
+  @IsOptional()
+  @IsString()
+  note?: string;
+
+  @IsOptional()
+  @IsString()
+  imageUrl?: string;
 }
 
 export class ProductQueryDto {

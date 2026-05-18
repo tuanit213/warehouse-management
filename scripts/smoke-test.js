@@ -25,6 +25,13 @@ async function request(url, options = {}) {
   return data;
 }
 
+async function requestBuffer(url, options = {}) {
+  const res = await fetch(url, { ...options, headers: { ...(options.headers || {}) } });
+  const buffer = Buffer.from(await res.arrayBuffer());
+  if (!res.ok) { const err = new Error(`${res.status} ${res.statusText}`); err.data = buffer.toString('utf8').slice(0, 300); throw err; }
+  return { buffer, contentType: res.headers.get('content-type') || '' };
+}
+
 async function ensureProduct(headers) {
   const list = await request(`${API}/products?keyword=SMOKE-TX-SKU&page=1&limit=20`, { headers });
   const found = list?.data?.find((item) => item.sku === 'SMOKE-TX-SKU');
@@ -67,6 +74,12 @@ async function ensureLocation(headers, warehouse) {
   const cancelInbound = await assertOk('Create cancellable inbound draft', () => request(`${API}/inbounds`, { method: 'POST', headers, body: JSON.stringify({ warehouseId: warehouse.id, supplierId: supplier.id, note: 'Smoke cancel inbound', items: [{ productId: product.id, locationId: location.id, quantity: 1, unitPrice: 1000 }] }) }));
   await assertOk('Cancel inbound draft', () => request(`${API}/inbounds/${cancelInbound.id}/cancel`, { method: 'POST', headers }));
   await assertOk('Confirm inbound', () => request(`${API}/inbounds/${inbound.id}/confirm`, { method: 'POST', headers }));
+  await assertOk('Inbound PDF export via Gateway', async () => {
+    const pdf = await requestBuffer(`${API}/inbounds/${inbound.id}/pdf`, { headers });
+    if (!pdf.contentType.includes('application/pdf')) throw new Error(`Unexpected PDF content type: ${pdf.contentType}`);
+    if (pdf.buffer.subarray(0, 5).toString() !== '%PDF-') throw new Error('Inbound PDF is not a valid PDF response');
+    if (pdf.buffer.length < 1000) throw new Error('Inbound PDF response is unexpectedly small');
+  });
   const inboundQuantity = stockAtLocation(await request(`${API}/stock-levels?warehouseId=${warehouse.id}&productId=${product.id}`, { headers }));
   if (inboundQuantity < beforeQuantity + 10) throw new Error('Inbound did not increase stock at smoke location');
 
