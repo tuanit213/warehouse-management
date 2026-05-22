@@ -11,3 +11,4 @@ postgres-data
 rabbitmq-data
 redis-data
 backups
+tmp-ui-check

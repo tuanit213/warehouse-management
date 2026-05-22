@@ -4,6 +4,8 @@
 
 - `GET /api/health`: API Gateway liveness.
 - `GET /api/health/ready`: API Gateway readiness plus downstream checks.
+- `GET /api/metrics`: API Gateway Prometheus text metrics.
+- `GET /api/metrics` on each backend container: service uptime and memory metrics.
 
 Readiness validates:
 
@@ -43,5 +45,6 @@ Pipeline stages:
 
 - Keep `/api/health` for load balancer liveness probes.
 - Use `/api/health/ready` for readiness probes before accepting traffic.
+- Scrape gateway metrics through the published gateway port. Scrape service metrics from the Docker network or a private monitoring network; production compose does not publish backend service ports.
 - Preserve `x-correlation-id` from Gateway logs and client responses for request tracing.
 - Centralized logging can ingest `docker compose logs` output initially; Loki/ELK can be added later without app API changes.
