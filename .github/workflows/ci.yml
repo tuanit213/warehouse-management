@@ -25,11 +25,32 @@ jobs:
       - name: Validate Docker Compose
         run: docker compose config
 
-      - name: Build workspaces
-        run: npm run build --workspaces
+      - name: Static quality
+        run: npm run test:quality
+
+      - name: Typecheck services
+        run: |
+          npx tsc --noEmit -p services/auth-service/tsconfig.json
+          npx tsc --noEmit -p services/inventory-service/tsconfig.json
+          npx tsc --noEmit -p services/transaction-service/tsconfig.json
+          npx tsc --noEmit -p services/api-gateway/tsconfig.json
+          npx tsc --noEmit -p services/product-service/tsconfig.json
+          npx tsc --noEmit -p services/report-service/tsconfig.json
+
+      - name: Migration dry-run
+        run: npm run migrate:dry-run
+
+      - name: Frontend build
+        run: npm --workspace frontend run build
 
       - name: Regression tests
         run: npm run test:regression
+
+      - name: Critical tests
+        run: npm run test:critical
+
+      - name: Build workspaces
+        run: npm run build --workspaces
 
       - name: Start stack
         run: docker compose up -d --build

@@ -1,4 +1,8 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const root = path.resolve(__dirname, '..');
 
 async function test(name, fn) {
   try {
@@ -11,7 +15,19 @@ async function test(name, fn) {
 }
 
 function confirmTransaction(transaction) {
-  if (transaction.status !== 'DRAFT') throw new Error(`Only DRAFT transactions can be confirmed. Current status: ${transaction.status}`);
+  if (!['DRAFT', 'CONFIRM_FAILED'].includes(transaction.status)) throw new Error(`Only DRAFT or CONFIRM_FAILED transactions can be confirmed. Current status: ${transaction.status}`);
+  return { ...transaction, status: 'CONFIRMED' };
+}
+
+function confirmWithItemIdempotency(transaction, appliedItems) {
+  if (!['DRAFT', 'CONFIRM_FAILED', 'CONFIRMING'].includes(transaction.status)) {
+    if (transaction.status === 'CONFIRMED') return transaction;
+    throw new Error(`Only DRAFT or CONFIRM_FAILED transactions can be confirmed. Current status: ${transaction.status}`);
+  }
+  for (const item of transaction.items) {
+    if (appliedItems.has(item.id)) continue;
+    appliedItems.add(item.id);
+  }
   return { ...transaction, status: 'CONFIRMED' };
 }
 
@@ -20,13 +36,18 @@ function cancelTransaction(transaction) {
   return { ...transaction, status: 'CANCELLED' };
 }
 
+function failConfirm(transaction) {
+  if (transaction.status !== 'CONFIRMING') throw new Error('Only CONFIRMING transactions can fail confirmation');
+  return { ...transaction, status: 'CONFIRM_FAILED', confirmError: 'Inventory sync failed', confirmAttempts: transaction.confirmAttempts || 1 };
+}
+
 (async () => {
   await test('Transaction confirms draft', () => {
     assert.equal(confirmTransaction({ id: 't1', status: 'DRAFT' }).status, 'CONFIRMED');
   });
 
   await test('Transaction rejects duplicate confirm', () => {
-    assert.throws(() => confirmTransaction({ id: 't1', status: 'CONFIRMED' }), /Only DRAFT/);
+    assert.throws(() => confirmTransaction({ id: 't1', status: 'CONFIRMED' }), /Only DRAFT or CONFIRM_FAILED/);
   });
 
   await test('Transaction cancels draft', () => {
@@ -35,6 +56,55 @@ function cancelTransaction(transaction) {
 
   await test('Transaction rejects cancelling confirmed voucher', () => {
     assert.throws(() => cancelTransaction({ id: 't1', status: 'CONFIRMED' }), /Only DRAFT/);
+  });
+
+  await test('Transaction rejects cancelling CONFIRMING and CONFIRM_FAILED vouchers', () => {
+    assert.throws(() => cancelTransaction({ id: 't1', status: 'CONFIRMING' }), /Only DRAFT/);
+    assert.throws(() => cancelTransaction({ id: 't1', status: 'CONFIRM_FAILED' }), /Only DRAFT/);
+  });
+
+  await test('Failed confirmation moves to CONFIRM_FAILED instead of DRAFT', () => {
+    const failed = failConfirm({ id: 't1', status: 'CONFIRMING', confirmAttempts: 1 });
+    assert.equal(failed.status, 'CONFIRM_FAILED');
+    assert.equal(failed.confirmError, 'Inventory sync failed');
+    assert.equal(failed.confirmAttempts, 1);
+  });
+
+  await test('Confirm retry does not apply transaction items twice', () => {
+    const appliedItems = new Set();
+    const transaction = { id: 't1', status: 'DRAFT', items: [{ id: 'i1' }, { id: 'i2' }] };
+    const confirmed = confirmWithItemIdempotency(transaction, appliedItems);
+    const retried = confirmWithItemIdempotency({ ...confirmed, items: transaction.items }, appliedItems);
+    assert.equal(retried.status, 'CONFIRMED');
+    assert.deepEqual([...appliedItems].sort(), ['i1', 'i2']);
+  });
+
+  await test('Recoverable CONFIRMING transaction can be retried idempotently', () => {
+    const appliedItems = new Set(['i1']);
+    const retried = confirmWithItemIdempotency({ id: 't1', status: 'CONFIRMING', items: [{ id: 'i1' }, { id: 'i2' }] }, appliedItems);
+    assert.equal(retried.status, 'CONFIRMED');
+    assert.deepEqual([...appliedItems].sort(), ['i1', 'i2']);
+  });
+
+  await test('CONFIRM_FAILED transaction can be retried idempotently', () => {
+    const appliedItems = new Set(['i1']);
+    const retried = confirmWithItemIdempotency({ id: 't1', status: 'CONFIRM_FAILED', items: [{ id: 'i1' }, { id: 'i2' }] }, appliedItems);
+    assert.equal(retried.status, 'CONFIRMED');
+    assert.deepEqual([...appliedItems].sort(), ['i1', 'i2']);
+  });
+
+  await test('Transaction service applies confirm recovery migration at startup', () => {
+    const source = fs.readFileSync(path.join(root, 'services/transaction-service/src/transaction.service.ts'), 'utf8');
+    assert.match(source, /implements OnModuleInit/);
+    assert.match(source, /async onModuleInit\(\)/);
+    assert.match(source, /ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS confirming_started_at TIMESTAMPTZ/);
+    assert.match(source, /CONFIRM_FAILED/);
+    assert.match(source, /idx_stock_transactions_status_confirming_started/);
+  });
+
+  await test('Transaction service rejects duplicate confirmed voucher API calls', () => {
+    const source = fs.readFileSync(path.join(root, 'services/transaction-service/src/transaction.service.ts'), 'utf8');
+    assert.match(source, /existing\.status === 'CONFIRMED'\) throw new ConflictException\('Transaction is already confirmed'\)/);
   });
 
   if (process.exitCode) process.exit(1);

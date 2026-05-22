@@ -32,6 +32,23 @@ function checkFile(file) {
 
 walk(root);
 
+const metricControllers = [
+  'services/auth-service/src/health.controller.ts',
+  'services/product-service/src/health.controller.ts',
+  'services/inventory-service/src/health.controller.ts',
+  'services/transaction-service/src/health.controller.ts',
+  'services/report-service/src/health.controller.ts',
+];
+
+for (const controller of metricControllers) {
+  const text = fs.readFileSync(path.join(root, controller), 'utf8');
+  if (!/@Get\('metrics'\)/.test(text)) failures.push(`${controller} is missing a metrics endpoint`);
+  if (!/text\/plain/.test(text)) failures.push(`${controller} metrics endpoint must return Prometheus text`);
+}
+
+const gateway = fs.readFileSync(path.join(root, 'services/api-gateway/src/gateway.controller.ts'), 'utf8');
+if (!/@Get\('metrics'\)/.test(gateway)) failures.push('services/api-gateway/src/gateway.controller.ts is missing gateway metrics');
+
 if (failures.length) {
   console.error('Static quality check failed:');
   for (const failure of failures) console.error(`- ${failure}`);
