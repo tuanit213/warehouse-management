@@ -13,10 +13,6 @@ export class RegisterDto {
 
   @IsString()
   fullName!: string;
-
-  @IsOptional()
-  @IsIn(ROLES)
-  role?: Role;
 }
 
 export class LoginDto {
@@ -29,14 +25,14 @@ export class LoginDto {
 
 export class RefreshTokenDto {
   @IsString()
-  @MinLength(32)
+  @MinLength(70)
   refreshToken!: string;
 }
 
 export class LogoutDto {
   @IsOptional()
   @IsString()
-  @MinLength(32)
+  @MinLength(70)
   refreshToken?: string;
 }
 

@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsIn, IsNotEmpty, IsNumber, IsOptional, IsString, IsUUID, Min, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsIn, IsNotEmpty, IsNumber, IsOptional, IsString, IsUUID, Matches, Min, ValidateNested } from 'class-validator';
 
 export class CreateSupplierDto {
   @IsString()
@@ -78,6 +78,7 @@ export class TransactionItemDto {
 export class CreateTransactionDto {
   @IsOptional()
   @IsString()
+  @Matches(/^[A-Za-z0-9._-]{1,50}$/)
   code?: string;
 
   @IsUUID()

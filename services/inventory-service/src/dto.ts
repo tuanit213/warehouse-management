@@ -96,4 +96,12 @@ export class AdjustStockDto {
   @Type(() => Number)
   @IsNumber()
   delta!: number;
+
+  @IsOptional()
+  @IsUUID()
+  referenceId?: string;
+
+  @IsOptional()
+  @IsString()
+  note?: string;
 }

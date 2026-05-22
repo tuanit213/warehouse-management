@@ -1,12 +1,26 @@
-import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { Pool } from 'pg';
 import { PG_POOL } from './database';
 import { AdjustStockDto, CreateLocationDto, CreateWarehouseDto, UpdateLocationDto, UpdateWarehouseDto, UpsertStockDto } from './dto';
 
 @Injectable()
-export class InventoryService {
-  constructor(@Inject(PG_POOL) private readonly db: Pool) {
-    void this.ensureSchema();
+export class InventoryService implements OnModuleInit {
+  constructor(@Inject(PG_POOL) private readonly db: Pool) {}
+
+  async onModuleInit() {
+    await this.ensureSchema();
+  }
+
+  private log(level: 'info' | 'warn' | 'error', event: string, fields: Record<string, unknown> = {}) {
+    console.log(JSON.stringify({ service: 'inventory-service', level, event, timestamp: new Date().toISOString(), ...fields }));
+  }
+
+  private async audit(event: string, metadata: Record<string, unknown> = {}) {
+    try {
+      await this.db.query('INSERT INTO inventory_audit_events(event, metadata) VALUES($1,$2)', [event, JSON.stringify(metadata)]);
+    } catch {
+      this.log('warn', 'audit_write_failed', { event });
+    }
   }
 
   private async ensureSchema() {
@@ -28,6 +42,48 @@ export class InventoryService {
       CREATE INDEX IF NOT EXISTS idx_stock_movements_warehouse ON stock_movements(warehouse_id);
       CREATE INDEX IF NOT EXISTS idx_stock_movements_reference ON stock_movements(reference_type, reference_id);
       CREATE INDEX IF NOT EXISTS idx_stock_movements_created ON stock_movements(created_at);
+      WITH duplicate_stock AS (
+        SELECT
+          MIN(id::text)::uuid AS keep_id,
+          product_id,
+          warehouse_id,
+          location_id,
+          SUM(quantity) AS quantity,
+          MAX(min_quantity) AS min_quantity,
+          MAX(last_movement_at) AS last_movement_at
+        FROM stock_levels
+        GROUP BY product_id, warehouse_id, location_id
+        HAVING COUNT(*) > 1
+      ),
+      merged AS (
+        UPDATE stock_levels s
+        SET
+          quantity = d.quantity,
+          min_quantity = d.min_quantity,
+          last_movement_at = d.last_movement_at
+        FROM duplicate_stock d
+        WHERE s.id = d.keep_id
+        RETURNING s.id
+      )
+      DELETE FROM stock_levels s
+      USING duplicate_stock d
+      WHERE s.product_id = d.product_id
+        AND s.warehouse_id = d.warehouse_id
+        AND s.location_id IS NOT DISTINCT FROM d.location_id
+        AND s.id <> d.keep_id;
+      CREATE UNIQUE INDEX IF NOT EXISTS ux_stock_levels_product_warehouse_location
+        ON stock_levels(product_id, warehouse_id, location_id) NULLS NOT DISTINCT;
+      CREATE UNIQUE INDEX IF NOT EXISTS ux_stock_movements_transaction_reference
+        ON stock_movements(reference_type, reference_id, product_id, warehouse_id, location_id)
+        NULLS NOT DISTINCT
+        WHERE reference_type = 'transaction' AND reference_id IS NOT NULL;
+      CREATE TABLE IF NOT EXISTS inventory_audit_events (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        event VARCHAR(80) NOT NULL,
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_inventory_audit_events_event_created ON inventory_audit_events(event, created_at DESC);
     `);
   }
 
@@ -75,6 +131,10 @@ export class InventoryService {
     if (!locationId) return;
     const location = await this.db.query('SELECT id FROM warehouse_locations WHERE id=$1 AND warehouse_id=$2', [locationId, warehouseId]);
     if (!location.rowCount) throw new ConflictException('Location does not belong to selected warehouse');
+  }
+
+  private async lockStockKey(client: any, productId: string, warehouseId: string, locationId?: string | null) {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [`stock:${productId}:${warehouseId}:${locationId || 'NO_LOCATION'}`]);
   }
 
   private async recordMovement(input: { productId: string; warehouseId: string; locationId?: string | null; movementType: 'INBOUND' | 'OUTBOUND' | 'ADJUSTMENT'; quantityDelta: number; quantityAfter: number; referenceType?: string; referenceId?: string; note?: string }) {
@@ -178,41 +238,154 @@ export class InventoryService {
   }
 
   async upsertStock(dto: UpsertStockDto) {
-    await this.assertLocationBelongsToWarehouse(dto.warehouseId, dto.locationId);
+    const client = await this.db.connect();
     try {
-      const current = await this.db.query('SELECT quantity FROM stock_levels WHERE product_id=$1 AND warehouse_id=$2 AND location_id IS NOT DISTINCT FROM $3', [dto.productId, dto.warehouseId, dto.locationId || null]);
-      const beforeQuantity = current.rowCount ? Number(current.rows[0].quantity || 0) : 0;
-      const result = await this.db.query(
-        `INSERT INTO stock_levels(product_id,warehouse_id,location_id,quantity,min_quantity,last_movement_at)
-         VALUES($1,$2,$3,$4,$5,NOW())
-         ON CONFLICT (product_id, warehouse_id, location_id)
-         DO UPDATE SET quantity=EXCLUDED.quantity,min_quantity=EXCLUDED.min_quantity,last_movement_at=NOW()
-         RETURNING id, quantity`,
-        [dto.productId, dto.warehouseId, dto.locationId || null, dto.quantity, dto.minQuantity || 0],
-      );
-      const afterQuantity = Number(result.rows[0].quantity || dto.quantity || 0);
-      if (afterQuantity !== beforeQuantity) {
-        await this.recordMovement({ productId: dto.productId, warehouseId: dto.warehouseId, locationId: dto.locationId, movementType: 'ADJUSTMENT', quantityDelta: afterQuantity - beforeQuantity, quantityAfter: afterQuantity, referenceType: 'manual', note: 'Manual stock upsert' });
+      await client.query('BEGIN');
+      const locationId = dto.locationId || null;
+      await this.lockStockKey(client, dto.productId, dto.warehouseId, locationId);
+      if (locationId) {
+        const location = await client.query('SELECT id FROM warehouse_locations WHERE id=$1 AND warehouse_id=$2', [locationId, dto.warehouseId]);
+        if (!location.rowCount) throw new ConflictException('Location does not belong to selected warehouse');
       }
-      return (await this.listStock(dto.productId, dto.warehouseId)).find((item) => item.id === result.rows[0].id);
+
+      const current = await client.query(
+        'SELECT * FROM stock_levels WHERE product_id=$1 AND warehouse_id=$2 AND location_id IS NOT DISTINCT FROM $3 FOR UPDATE',
+        [dto.productId, dto.warehouseId, locationId],
+      );
+      const beforeQuantity = current.rowCount ? Number(current.rows[0].quantity || 0) : 0;
+      let stockId: string;
+      let afterQuantity: number;
+
+      if (current.rowCount) {
+        const updated = await client.query(
+          `UPDATE stock_levels
+           SET quantity=$1, min_quantity=$2, last_movement_at=NOW()
+           WHERE id=$3
+           RETURNING id, quantity`,
+          [dto.quantity, dto.minQuantity || 0, current.rows[0].id],
+        );
+        stockId = updated.rows[0].id;
+        afterQuantity = Number(updated.rows[0].quantity || 0);
+      } else {
+        const inserted = await client.query(
+          `INSERT INTO stock_levels(product_id,warehouse_id,location_id,quantity,min_quantity,last_movement_at)
+           VALUES($1,$2,$3,$4,$5,NOW())
+           RETURNING id, quantity`,
+          [dto.productId, dto.warehouseId, locationId, dto.quantity, dto.minQuantity || 0],
+        );
+        stockId = inserted.rows[0].id;
+        afterQuantity = Number(inserted.rows[0].quantity || 0);
+      }
+
+      if (afterQuantity !== beforeQuantity) {
+        await client.query(
+          `INSERT INTO stock_movements(product_id, warehouse_id, location_id, movement_type, quantity_delta, quantity_after, reference_type, reference_id, note)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [dto.productId, dto.warehouseId, locationId, 'ADJUSTMENT', afterQuantity - beforeQuantity, afterQuantity, 'manual', null, 'Manual stock upsert'],
+        );
+      }
+      await client.query('COMMIT');
+      return (await this.listStock(dto.productId, dto.warehouseId)).find((item) => item.id === stockId);
     } catch (error: any) {
+      await client.query('ROLLBACK');
       if (error?.code === '23503') throw new NotFoundException('Warehouse or location not found');
       throw error;
+    } finally {
+      client.release();
     }
   }
 
   async adjustStock(dto: AdjustStockDto) {
     await this.assertLocationBelongsToWarehouse(dto.warehouseId, dto.locationId);
-    const current = await this.db.query('SELECT * FROM stock_levels WHERE product_id=$1 AND warehouse_id=$2 AND location_id IS NOT DISTINCT FROM $3', [dto.productId, dto.warehouseId, dto.locationId || null]);
-    if (!current.rowCount) {
-      if (dto.delta < 0) throw new ConflictException('Insufficient stock for outbound transaction');
-      return this.upsertStock({ productId: dto.productId, warehouseId: dto.warehouseId, locationId: dto.locationId, quantity: dto.delta, minQuantity: 0 });
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      const locationId = dto.locationId || null;
+      await this.lockStockKey(client, dto.productId, dto.warehouseId, locationId);
+      if (dto.referenceId) {
+        const duplicate = await client.query(
+          `SELECT quantity_after FROM stock_movements
+           WHERE reference_type='transaction'
+             AND reference_id=$1
+             AND product_id=$2
+             AND warehouse_id=$3
+             AND location_id IS NOT DISTINCT FROM $4
+           LIMIT 1`,
+          [dto.referenceId, dto.productId, dto.warehouseId, locationId],
+        );
+        if (duplicate.rowCount) {
+          await client.query('COMMIT');
+          this.log('info', 'idempotency_hit', { productId: dto.productId, warehouseId: dto.warehouseId, referenceId: dto.referenceId });
+          return (await this.listStock(dto.productId, dto.warehouseId)).find((item) => item.locationId === locationId);
+        }
+      }
+
+      let current = await client.query(
+        'SELECT * FROM stock_levels WHERE product_id=$1 AND warehouse_id=$2 AND location_id IS NOT DISTINCT FROM $3 FOR UPDATE',
+        [dto.productId, dto.warehouseId, locationId],
+      );
+      if (!current.rowCount) {
+        await client.query(
+          `INSERT INTO stock_levels(product_id,warehouse_id,location_id,quantity,min_quantity,last_movement_at)
+           VALUES($1,$2,$3,0,0,NOW())`,
+          [dto.productId, dto.warehouseId, locationId],
+        );
+        current = await client.query(
+          'SELECT * FROM stock_levels WHERE product_id=$1 AND warehouse_id=$2 AND location_id IS NOT DISTINCT FROM $3 FOR UPDATE',
+          [dto.productId, dto.warehouseId, locationId],
+        );
+      }
+      if (!current.rowCount) throw new ConflictException('Stock level could not be locked');
+
+      if (dto.referenceId) {
+        const duplicateAfterLock = await client.query(
+          `SELECT quantity_after FROM stock_movements
+           WHERE reference_type='transaction'
+             AND reference_id=$1
+             AND product_id=$2
+             AND warehouse_id=$3
+             AND location_id IS NOT DISTINCT FROM $4
+           LIMIT 1`,
+          [dto.referenceId, dto.productId, dto.warehouseId, locationId],
+        );
+        if (duplicateAfterLock.rowCount) {
+          await client.query('COMMIT');
+          this.log('info', 'idempotency_hit', { productId: dto.productId, warehouseId: dto.warehouseId, referenceId: dto.referenceId });
+          return (await this.listStock(dto.productId, dto.warehouseId)).find((item) => item.id === current.rows[0].id);
+        }
+      }
+
+      const updated = await client.query(
+        `UPDATE stock_levels
+         SET quantity = quantity + $1, last_movement_at=NOW()
+         WHERE id=$2 AND quantity + $1 >= 0
+         RETURNING id, quantity`,
+        [dto.delta, current.rows[0].id],
+      );
+      if (!updated.rowCount) {
+        this.log('warn', 'insufficient_stock', { productId: dto.productId, warehouseId: dto.warehouseId, locationId });
+        await this.audit('insufficient_stock', { productId: dto.productId, warehouseId: dto.warehouseId, locationId });
+        throw new ConflictException('Insufficient stock for outbound transaction');
+      }
+      await client.query(
+        `INSERT INTO stock_movements(product_id, warehouse_id, location_id, movement_type, quantity_delta, quantity_after, reference_type, reference_id, note)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [dto.productId, dto.warehouseId, locationId, dto.delta >= 0 ? 'INBOUND' : 'OUTBOUND', dto.delta, Number(updated.rows[0].quantity || 0), 'transaction', dto.referenceId || null, dto.note || 'Transaction stock adjustment'],
+      );
+      await client.query('COMMIT');
+      this.log('info', 'stock_adjusted', { productId: dto.productId, warehouseId: dto.warehouseId, locationId, delta: dto.delta, referenceId: dto.referenceId || null });
+      await this.audit('stock_adjusted', { productId: dto.productId, warehouseId: dto.warehouseId, locationId, delta: dto.delta, referenceId: dto.referenceId || null });
+      return (await this.listStock(dto.productId, dto.warehouseId)).find((item) => item.id === current.rows[0].id);
+    } catch (error: any) {
+      await client.query('ROLLBACK');
+      if (error?.code === '23505' && dto.referenceId) {
+        return (await this.listStock(dto.productId, dto.warehouseId)).find((item) => item.locationId === (dto.locationId || null));
+      }
+      if (error?.code === '23503') throw new NotFoundException('Warehouse or location not found');
+      throw error;
+    } finally {
+      client.release();
     }
-    const nextQuantity = Number(current.rows[0].quantity) + dto.delta;
-    if (nextQuantity < 0) throw new ConflictException('Insufficient stock for outbound transaction');
-    await this.db.query('UPDATE stock_levels SET quantity=$1,last_movement_at=NOW() WHERE id=$2', [nextQuantity, current.rows[0].id]);
-    await this.recordMovement({ productId: dto.productId, warehouseId: dto.warehouseId, locationId: dto.locationId, movementType: dto.delta >= 0 ? 'INBOUND' : 'OUTBOUND', quantityDelta: dto.delta, quantityAfter: nextQuantity, referenceType: 'transaction', note: 'Transaction stock adjustment' });
-    return (await this.listStock(dto.productId, dto.warehouseId)).find((item) => item.id === current.rows[0].id);
   }
 
   async listMovements(productId?: string, warehouseId?: string) {

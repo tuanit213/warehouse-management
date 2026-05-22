@@ -1,6 +1,6 @@
-import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, OnModuleInit, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import { Pool } from 'pg';
 import * as bcrypt from 'bcryptjs';
 import { PG_POOL } from './database';
@@ -9,8 +9,62 @@ import { ChangePasswordDto, LoginDto, LogoutDto, RefreshTokenDto, RegisterDto, R
 type JwtPayload = { sub: string; email: string; role: Role; fullName: string };
 
 @Injectable()
-export class AuthService {
+export class AuthService implements OnModuleInit {
   constructor(@Inject(PG_POOL) private readonly db: Pool, private readonly jwt: JwtService) {}
+
+  async onModuleInit() {
+    await this.ensureSchema();
+  }
+
+  private async ensureSchema() {
+    await this.db.query(`
+      CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+      CREATE TABLE IF NOT EXISTS users (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        full_name VARCHAR(255),
+        role VARCHAR(50) NOT NULL DEFAULT 'WAREHOUSE_STAFF',
+        status VARCHAR(30) NOT NULL DEFAULT 'ACTIVE',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS refresh_tokens (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID REFERENCES users(id),
+        token_hash TEXT NOT NULL,
+        family_id UUID,
+        replaced_by UUID NULL,
+        expires_at TIMESTAMPTZ NOT NULL,
+        revoked_at TIMESTAMPTZ,
+        reuse_detected_at TIMESTAMPTZ NULL
+      );
+      CREATE TABLE IF NOT EXISTS auth_audit_events (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        event VARCHAR(80) NOT NULL,
+        user_id UUID NULL,
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS family_id UUID;
+      ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS replaced_by UUID NULL;
+      ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS reuse_detected_at TIMESTAMPTZ NULL;
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_users_role') THEN
+          ALTER TABLE users ADD CONSTRAINT chk_users_role CHECK (role IN ('ADMIN', 'MANAGER', 'WAREHOUSE_STAFF'));
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_users_status') THEN
+          ALTER TABLE users ADD CONSTRAINT chk_users_status CHECK (status IN ('ACTIVE', 'DISABLED'));
+        END IF;
+      END $$;
+      CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_active ON refresh_tokens(user_id) WHERE revoked_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_refresh_tokens_expires_at ON refresh_tokens(expires_at);
+      CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_expires ON refresh_tokens(user_id, expires_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_refresh_tokens_family ON refresh_tokens(family_id);
+      CREATE INDEX IF NOT EXISTS idx_refresh_tokens_replaced_by ON refresh_tokens(replaced_by);
+      CREATE INDEX IF NOT EXISTS idx_auth_audit_events_event_created ON auth_audit_events(event, created_at DESC);
+    `);
+  }
 
   private sanitize(row: any) {
     if (!row) return null;
@@ -22,32 +76,57 @@ export class AuthService {
     return Number.isFinite(raw) && raw > 0 ? raw : 7;
   }
 
-  private async issueRefreshToken(userId: string) {
-    const refreshToken = randomBytes(48).toString('base64url');
-    const tokenHash = await bcrypt.hash(refreshToken, 12);
-    const expiresAt = new Date(Date.now() + this.refreshDays() * 24 * 60 * 60 * 1000);
-    await this.db.query('INSERT INTO refresh_tokens(user_id, token_hash, expires_at) VALUES($1,$2,$3)', [userId, tokenHash, expiresAt]);
-    return { refreshToken, refreshExpiresAt: expiresAt.toISOString() };
+  private log(level: 'info' | 'warn' | 'error', event: string, fields: Record<string, unknown> = {}) {
+    console.log(JSON.stringify({ service: 'auth-service', level, event, timestamp: new Date().toISOString(), ...fields }));
   }
 
-  private async sign(user: any) {
+  private async audit(event: string, userId?: string | null, metadata: Record<string, unknown> = {}) {
+    try {
+      await this.db.query('INSERT INTO auth_audit_events(event, user_id, metadata) VALUES($1,$2,$3)', [event, userId || null, JSON.stringify(metadata)]);
+    } catch {
+      this.log('warn', 'audit_write_failed', { event });
+    }
+  }
+
+  private parseRefreshToken(refreshToken: string) {
+    const [tokenId, secret, extra] = refreshToken.split('.');
+    if (!tokenId || !secret || extra || secret.length < 32) throw new UnauthorizedException('Invalid or expired refresh token');
+    return { tokenId, secret };
+  }
+
+  private async issueRefreshToken(userId: string, familyId: string = randomUUID()) {
+    const tokenId = randomUUID();
+    const secret = randomBytes(48).toString('base64url');
+    const tokenHash = await bcrypt.hash(secret, 12);
+    const expiresAt = new Date(Date.now() + this.refreshDays() * 24 * 60 * 60 * 1000);
+    await this.db.query(
+      'INSERT INTO refresh_tokens(id, user_id, token_hash, family_id, expires_at) VALUES($1,$2,$3,$4,$5)',
+      [tokenId, userId, tokenHash, familyId, expiresAt],
+    );
+    return { tokenId, familyId, refreshToken: `${tokenId}.${secret}`, refreshExpiresAt: expiresAt.toISOString() };
+  }
+
+  private async buildTokenResponse(user: any, refresh: { refreshToken: string; refreshExpiresAt: string }) {
     const payload: JwtPayload = { sub: user.id, email: user.email, role: user.role, fullName: user.full_name };
-    const refresh = await this.issueRefreshToken(user.id);
     return {
       accessToken: await this.jwt.signAsync(payload),
       refreshToken: refresh.refreshToken,
       tokenType: 'Bearer',
-      expiresIn: process.env.JWT_EXPIRES_IN || '1d',
+      expiresIn: process.env.JWT_EXPIRES_IN || '15m',
       refreshExpiresAt: refresh.refreshExpiresAt,
       user: this.sanitize(user),
     };
+  }
+
+  private async sign(user: any, familyId?: string) {
+    return this.buildTokenResponse(user, await this.issueRefreshToken(user.id, familyId));
   }
 
   async register(dto: RegisterDto) {
     const exists = await this.db.query('SELECT id FROM users WHERE lower(email)=lower($1)', [dto.email]);
     if (exists.rowCount) throw new ConflictException('Email already exists');
     const passwordHash = await bcrypt.hash(dto.password, 12);
-    const role = dto.role || 'WAREHOUSE_STAFF';
+    const role: Role = 'WAREHOUSE_STAFF';
     const result = await this.db.query(
       'INSERT INTO users(email, password_hash, full_name, role) VALUES($1,$2,$3,$4) RETURNING *',
       [dto.email.trim().toLowerCase(), passwordHash, dto.fullName.trim(), role],
@@ -58,28 +137,63 @@ export class AuthService {
   async login(dto: LoginDto) {
     const result = await this.db.query('SELECT * FROM users WHERE lower(email)=lower($1)', [dto.email]);
     const user = result.rows[0];
-    if (!user) throw new UnauthorizedException('Invalid credentials');
-    if (user.status !== 'ACTIVE') throw new ForbiddenException('Account is not active');
+    if (!user) {
+      this.log('warn', 'login_failed', { email: dto.email.trim().toLowerCase(), reason: 'invalid_credentials' });
+      throw new UnauthorizedException('Invalid credentials');
+    }
+    if (user.status !== 'ACTIVE') {
+      this.log('warn', 'login_failed', { email: dto.email.trim().toLowerCase(), reason: 'inactive' });
+      throw new ForbiddenException('Account is not active');
+    }
     const ok = await bcrypt.compare(dto.password, user.password_hash);
-    if (!ok) throw new UnauthorizedException('Invalid credentials');
+    if (!ok) {
+      this.log('warn', 'login_failed', { email: dto.email.trim().toLowerCase(), reason: 'invalid_credentials' });
+      throw new UnauthorizedException('Invalid credentials');
+    }
     return this.sign(user);
   }
 
   async refresh(dto: RefreshTokenDto) {
+    const { tokenId, secret } = this.parseRefreshToken(dto.refreshToken);
     const result = await this.db.query(
-      `SELECT rt.id, rt.token_hash, rt.user_id, u.*
+      `SELECT rt.id AS refresh_token_id, rt.token_hash, rt.user_id, rt.family_id, rt.revoked_at, rt.expires_at, u.*
        FROM refresh_tokens rt
        JOIN users u ON u.id = rt.user_id
-       WHERE rt.revoked_at IS NULL AND rt.expires_at > NOW() AND u.status = 'ACTIVE'
-       ORDER BY rt.expires_at DESC`,
+       WHERE rt.id=$1 AND u.status = 'ACTIVE'`,
+      [tokenId],
     );
-    for (const row of result.rows) {
-      if (await bcrypt.compare(dto.refreshToken, row.token_hash)) {
-        await this.db.query('UPDATE refresh_tokens SET revoked_at=NOW() WHERE id=$1', [row.id]);
-        return this.sign(row);
-      }
+    const row = result.rows[0];
+    if (!row || !(await bcrypt.compare(secret, row.token_hash))) {
+      this.log('warn', 'refresh_failed', { reason: 'invalid_token' });
+      throw new UnauthorizedException('Invalid or expired refresh token');
     }
-    throw new UnauthorizedException('Invalid or expired refresh token');
+
+    if (row.revoked_at) {
+      if (row.family_id) {
+        await this.db.query(
+          `UPDATE refresh_tokens
+           SET revoked_at=COALESCE(revoked_at, NOW()),
+               reuse_detected_at=COALESCE(reuse_detected_at, NOW())
+           WHERE family_id=$1`,
+          [row.family_id],
+        );
+      } else {
+        await this.db.query('UPDATE refresh_tokens SET reuse_detected_at=COALESCE(reuse_detected_at, NOW()) WHERE id=$1', [row.refresh_token_id]);
+      }
+      this.log('warn', 'reuse_detected', { userId: row.user_id });
+      await this.audit('refresh_reuse_detected', row.user_id, { familyId: row.family_id || null });
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+
+    if (new Date(row.expires_at).getTime() <= Date.now()) {
+      this.log('warn', 'refresh_failed', { reason: 'expired', userId: row.user_id });
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+
+    const familyId = row.family_id || randomUUID();
+    const refresh = await this.issueRefreshToken(row.user_id, familyId);
+    await this.db.query('UPDATE refresh_tokens SET revoked_at=NOW(), family_id=$2, replaced_by=$3 WHERE id=$1', [row.refresh_token_id, familyId, refresh.tokenId]);
+    return this.buildTokenResponse(row, refresh);
   }
 
   async logout(token: string | undefined, dto: LogoutDto) {
@@ -94,15 +208,19 @@ export class AuthService {
     }
 
     if (dto.refreshToken) {
-      const params: unknown[] = [];
-      const scope = userId ? ' AND user_id=$1' : '';
-      if (userId) params.push(userId);
-      const result = await this.db.query(`SELECT id, token_hash FROM refresh_tokens WHERE revoked_at IS NULL${scope}`, params);
-      for (const row of result.rows) {
-        if (await bcrypt.compare(dto.refreshToken, row.token_hash)) {
-          await this.db.query('UPDATE refresh_tokens SET revoked_at=NOW() WHERE id=$1', [row.id]);
+      try {
+        const { tokenId, secret } = this.parseRefreshToken(dto.refreshToken);
+        const params: unknown[] = [tokenId];
+        const scope = userId ? ' AND user_id=$2' : '';
+        if (userId) params.push(userId);
+        const result = await this.db.query(`SELECT id, token_hash FROM refresh_tokens WHERE id=$1 AND revoked_at IS NULL${scope}`, params);
+        const row = result.rows[0];
+        if (row && await bcrypt.compare(secret, row.token_hash)) {
+          await this.db.query('UPDATE refresh_tokens SET revoked_at=NOW() WHERE id=$1', [tokenId]);
           return { loggedOut: true };
         }
+      } catch {
+        return { loggedOut: true };
       }
     }
 
@@ -150,6 +268,8 @@ export class AuthService {
     const result = await this.db.query('UPDATE users SET role=$1 WHERE id=$2 RETURNING *', [dto.role, id]);
     if (!result.rowCount) throw new NotFoundException('User not found');
     await this.db.query('UPDATE refresh_tokens SET revoked_at=NOW() WHERE user_id=$1 AND revoked_at IS NULL', [id]);
+    this.log('info', 'role_changed', { actorId: currentUser.id, userId: id, role: dto.role });
+    await this.audit('role_changed', id, { actorId: currentUser.id, role: dto.role });
     return this.sanitize(result.rows[0]);
   }
 }

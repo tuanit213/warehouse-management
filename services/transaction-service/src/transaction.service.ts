@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { Pool } from 'pg';
 import { PG_POOL } from './database';
 import { CreateGenericTransactionDto, CreateSupplierDto, CreateTransactionDto, UpdateSupplierDto } from './dto';
@@ -6,10 +6,110 @@ import { CreateGenericTransactionDto, CreateSupplierDto, CreateTransactionDto, U
 type TransactionType = 'INBOUND' | 'OUTBOUND';
 
 @Injectable()
-export class TransactionService {
+export class TransactionService implements OnModuleInit {
   constructor(@Inject(PG_POOL) private readonly db: Pool) {}
 
   private inventoryUrl = process.env.INVENTORY_API_URL || 'http://inventory-service:3003/api';
+
+  async onModuleInit() {
+    await this.ensureSchema();
+  }
+
+  private async ensureSchema() {
+    await this.db.query(`
+      CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+      CREATE TABLE IF NOT EXISTS suppliers (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        code VARCHAR(50) UNIQUE NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        contact_name VARCHAR(255),
+        phone VARCHAR(50),
+        email VARCHAR(255),
+        address TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS stock_transactions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        type VARCHAR(20) NOT NULL,
+        code VARCHAR(50) UNIQUE NOT NULL,
+        warehouse_id UUID NOT NULL,
+        supplier_id UUID NULL,
+        status VARCHAR(30) NOT NULL DEFAULT 'DRAFT',
+        note TEXT,
+        total_quantity NUMERIC(14,2) NOT NULL DEFAULT 0,
+        total_value NUMERIC(14,2) NOT NULL DEFAULT 0,
+        confirmed_at TIMESTAMPTZ,
+        confirm_error TEXT,
+        confirm_attempts INT NOT NULL DEFAULT 0,
+        confirming_started_at TIMESTAMPTZ,
+        created_by UUID,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS stock_transaction_items (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        transaction_id UUID NOT NULL REFERENCES stock_transactions(id) ON DELETE CASCADE,
+        product_id UUID NOT NULL,
+        location_id UUID NULL,
+        quantity NUMERIC(14,2) NOT NULL CHECK (quantity > 0),
+        unit_price NUMERIC(14,2) NOT NULL DEFAULT 0
+      );
+      CREATE TABLE IF NOT EXISTS transaction_audit_events (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        transaction_id UUID NULL,
+        event VARCHAR(80) NOT NULL,
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+      ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS total_quantity NUMERIC(14,2) NOT NULL DEFAULT 0;
+      ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS total_value NUMERIC(14,2) NOT NULL DEFAULT 0;
+      ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ;
+      ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS confirm_error TEXT;
+      ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS confirm_attempts INT NOT NULL DEFAULT 0;
+      ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS confirming_started_at TIMESTAMPTZ;
+      ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+      ALTER TABLE stock_transaction_items ADD COLUMN IF NOT EXISTS location_id UUID NULL;
+      UPDATE stock_transactions SET status = 'CONFIRMED', confirmed_at = COALESCE(confirmed_at, created_at) WHERE status = 'COMPLETED';
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_stock_transactions_status') THEN
+          ALTER TABLE stock_transactions DROP CONSTRAINT chk_stock_transactions_status;
+        END IF;
+        ALTER TABLE stock_transactions
+          ADD CONSTRAINT chk_stock_transactions_status
+          CHECK (status IN ('DRAFT', 'CONFIRMING', 'CONFIRM_FAILED', 'CONFIRMED', 'CANCELLED'));
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_stock_transactions_type') THEN
+          ALTER TABLE stock_transactions ADD CONSTRAINT chk_stock_transactions_type CHECK (type IN ('INBOUND', 'OUTBOUND'));
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_stock_transaction_items_unit_price') THEN
+          ALTER TABLE stock_transaction_items ADD CONSTRAINT chk_stock_transaction_items_unit_price CHECK (unit_price >= 0);
+        END IF;
+      END $$;
+      CREATE INDEX IF NOT EXISTS idx_stock_transactions_type ON stock_transactions(type);
+      CREATE INDEX IF NOT EXISTS idx_stock_transactions_status ON stock_transactions(status);
+      CREATE INDEX IF NOT EXISTS idx_stock_transactions_status_updated ON stock_transactions(status, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_stock_transactions_status_confirming_started ON stock_transactions(status, confirming_started_at);
+      CREATE INDEX IF NOT EXISTS idx_stock_transactions_warehouse ON stock_transactions(warehouse_id);
+      CREATE INDEX IF NOT EXISTS idx_stock_transactions_supplier ON stock_transactions(supplier_id);
+      CREATE INDEX IF NOT EXISTS idx_stock_transaction_items_product ON stock_transaction_items(product_id);
+      CREATE INDEX IF NOT EXISTS idx_stock_transaction_items_transaction ON stock_transaction_items(transaction_id);
+      CREATE INDEX IF NOT EXISTS idx_transaction_audit_events_transaction_created ON transaction_audit_events(transaction_id, created_at DESC);
+    `);
+  }
+
+  private log(level: 'info' | 'warn' | 'error', event: string, fields: Record<string, unknown> = {}) {
+    console.log(JSON.stringify({ service: 'transaction-service', level, event, timestamp: new Date().toISOString(), ...fields }));
+  }
+
+  private async audit(transactionId: string, event: string, metadata: Record<string, unknown> = {}) {
+    try {
+      await this.db.query('INSERT INTO transaction_audit_events(transaction_id, event, metadata) VALUES($1,$2,$3)', [transactionId, event, JSON.stringify(metadata)]);
+    } catch {
+      this.log('warn', 'audit_write_failed', { transactionId, event });
+    }
+  }
 
   private supplier(row: any) {
     return { id: row.id, code: row.code, name: row.name, contactName: row.contact_name, phone: row.phone, email: row.email, address: row.address, createdAt: row.created_at, updatedAt: row.updated_at };
@@ -27,6 +127,9 @@ export class TransactionService {
       totalQuantity: Number(row.total_quantity || 0),
       totalValue: Number(row.total_value || 0),
       confirmedAt: row.confirmed_at,
+      confirmError: row.confirm_error,
+      confirmAttempts: Number(row.confirm_attempts || 0),
+      confirmingStartedAt: row.confirming_started_at,
       createdBy: row.created_by,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -142,26 +245,60 @@ export class TransactionService {
   }
 
   async confirmTransaction(id: string) {
-    const transaction = await this.getTransaction(id);
-    if (transaction.status === 'CONFIRMED') throw new ConflictException('Transaction is already confirmed');
-    if (transaction.status !== 'DRAFT') throw new ConflictException('Only DRAFT transactions can be confirmed');
+    const claimed = await this.db.query(
+      `UPDATE stock_transactions
+       SET status=$1,
+           confirm_attempts=confirm_attempts + 1,
+           confirming_started_at=NOW(),
+           confirm_error=NULL,
+           updated_at=NOW()
+       WHERE id=$2
+         AND (
+           status=$3
+           OR status=$4
+           OR (status=$5 AND COALESCE(confirming_started_at, updated_at) < NOW() - ($6 || ' minutes')::interval)
+         )
+       RETURNING *`,
+      ['CONFIRMING', id, 'DRAFT', 'CONFIRM_FAILED', 'CONFIRMING', Number(process.env.CONFIRMING_RETRY_AFTER_MINUTES || 5)],
+    );
 
-    for (const item of transaction.items) {
-      if (transaction.type === 'INBOUND') {
-        await this.upsertStock(transaction.warehouseId, item.productId, item.locationId, item.quantity);
-      } else {
-        await this.adjustStock(transaction.warehouseId, item.productId, item.locationId, -item.quantity);
-      }
+    if (!claimed.rowCount) {
+      const existing = await this.getTransaction(id);
+      if (existing.status === 'CONFIRMED') throw new ConflictException('Transaction is already confirmed');
+      if (existing.status === 'CONFIRMING') throw new ConflictException('Transaction confirmation is already in progress');
+      if (existing.status === 'CONFIRM_FAILED') throw new ConflictException('Transaction confirmation failed and could not be reclaimed');
+      if (existing.status === 'CANCELLED') throw new ConflictException('Cancelled transactions cannot be confirmed');
+      throw new ConflictException('Only DRAFT or CONFIRM_FAILED transactions can be confirmed');
     }
 
-    await this.db.query('UPDATE stock_transactions SET status=$1, confirmed_at=NOW(), updated_at=NOW() WHERE id=$2', ['CONFIRMED', id]);
-    return this.getTransaction(id);
+    const transaction = await this.getTransaction(id);
+    this.log('info', 'confirm_started', { transactionId: id, status: transaction.status });
+    try {
+      for (const item of transaction.items) {
+        const delta = transaction.type === 'INBOUND' ? item.quantity : -item.quantity;
+        await this.adjustStock(transaction.warehouseId, item.productId, item.locationId, delta, item.id, transaction.id);
+      }
+
+      await this.db.query('UPDATE stock_transactions SET status=$1, confirmed_at=NOW(), updated_at=NOW() WHERE id=$2', ['CONFIRMED', id]);
+      this.log('info', 'confirm_completed', { transactionId: id });
+      await this.audit(id, 'confirm_completed');
+      return this.getTransaction(id);
+    } catch (error) {
+      const message = this.sanitizeError(error);
+      await this.db.query(
+        'UPDATE stock_transactions SET status=$1, confirm_error=$2, updated_at=NOW() WHERE id=$3 AND status=$4',
+        ['CONFIRM_FAILED', message, id, 'CONFIRMING'],
+      );
+      this.log('error', 'confirm_failed', { transactionId: id, message });
+      await this.audit(id, 'confirm_failed', { message });
+      throw error;
+    }
   }
 
   async cancelTransaction(id: string) {
     const transaction = await this.getTransaction(id);
-    if (transaction.status === 'CONFIRMED') throw new ConflictException('Confirmed transactions cannot be cancelled');
     if (transaction.status === 'CANCELLED') throw new ConflictException('Transaction is already cancelled');
+    if (transaction.status !== 'DRAFT') throw new ConflictException(`Only DRAFT transactions can be cancelled. Current status: ${transaction.status}`);
     await this.db.query('UPDATE stock_transactions SET status=$1, updated_at=NOW() WHERE id=$2', ['CANCELLED', id]);
     return this.getTransaction(id);
   }
@@ -253,25 +390,19 @@ export class TransactionService {
       .replace(/\)/g, '\\)');
   }
 
-  private async upsertStock(warehouseId: string, productId: string, locationId: string | null, quantity: number) {
-    const current = await this.findStock(warehouseId, productId, locationId);
-    const nextQuantity = current ? Number(current.quantity) + quantity : quantity;
-    await this.callInventory('/stock-levels', {
-      method: 'POST',
-      body: JSON.stringify({ productId, warehouseId, locationId: locationId || undefined, quantity: nextQuantity, minQuantity: current ? Number(current.minQuantity || 0) : 0 }),
-    });
+  private sanitizeError(error: unknown) {
+    const raw = error instanceof Error ? error.message : String(error || 'Unknown confirmation error');
+    return raw
+      .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]')
+      .replace(/password[=:]\S+/gi, 'password=[redacted]')
+      .slice(0, 1000);
   }
 
-  private async adjustStock(warehouseId: string, productId: string, locationId: string | null, delta: number) {
+  private async adjustStock(warehouseId: string, productId: string, locationId: string | null, delta: number, referenceId: string, transactionId: string) {
     await this.callInventory('/stock-levels/adjust', {
       method: 'POST',
-      body: JSON.stringify({ productId, warehouseId, locationId: locationId || undefined, delta }),
+      body: JSON.stringify({ productId, warehouseId, locationId: locationId || undefined, delta, referenceId, note: `Transaction ${transactionId} item ${referenceId} stock adjustment` }),
     });
-  }
-
-  private async findStock(warehouseId: string, productId: string, locationId: string | null) {
-    const stocks = await this.callInventory(`/stock-levels?warehouseId=${warehouseId}&productId=${productId}`);
-    return stocks.find((item: any) => (item.locationId || null) === (locationId || null));
   }
 
   private async callInventory(path: string, options: RequestInit = {}) {
