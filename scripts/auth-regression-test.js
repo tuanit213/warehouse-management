@@ -60,5 +60,17 @@ function parseRefreshToken(refreshToken) {
     assert.match(source, /CREATE INDEX IF NOT EXISTS idx_refresh_tokens_family/);
   });
 
+  await test('Admin can disable users without leaving active refresh sessions', () => {
+    const controller = fs.readFileSync(path.join(root, 'services/auth-service/src/auth.controller.ts'), 'utf8');
+    const dto = fs.readFileSync(path.join(root, 'services/auth-service/src/dto.ts'), 'utf8');
+    const source = fs.readFileSync(path.join(root, 'services/auth-service/src/auth.service.ts'), 'utf8');
+    assert.match(controller, /@Patch\('users\/:id\/status'\)/);
+    assert.match(dto, /class UpdateUserStatusDto/);
+    assert.match(dto, /IsIn\(\['ACTIVE', 'DISABLED'\]\)/);
+    assert.match(source, /Admin cannot disable own account/);
+    assert.match(source, /UPDATE refresh_tokens SET revoked_at=NOW\(\) WHERE user_id=\$1 AND revoked_at IS NULL/);
+    assert.match(source, /user_status_changed/);
+  });
+
   if (process.exitCode) process.exit(1);
 })();

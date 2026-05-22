@@ -13,8 +13,11 @@ RUN npm prune --omit=dev
 FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
-COPY package*.json ./
+RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nestjs
+COPY --from=builder --chown=nestjs:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=nestjs:nodejs /app/dist ./dist
+COPY --chown=nestjs:nodejs package*.json ./
+RUN mkdir -p /app/uploads/products && chown -R nestjs:nodejs /app/uploads
+USER nestjs
 EXPOSE 3002
 CMD ["node", "dist/main.js"]

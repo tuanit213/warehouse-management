@@ -40,6 +40,9 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: 3001
       JWT_SECRET: ${JWT_SECRET:-change-me-super-secret}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@wms.local}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-Password@123}
+      BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-Demo Admin}
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@auth-service-db:5432/${AUTH_DB:-auth_db}
@@ -128,6 +131,9 @@ services:
       JWT_SECRET: ${JWT_SECRET:-change-me-super-secret}
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672
+      TRANSACTION_OUTBOX_EXCHANGE: ${TRANSACTION_OUTBOX_EXCHANGE:-wms.transaction.events}
+      INVENTORY_TRANSACTION_CONSUMER_ENABLED: ${INVENTORY_TRANSACTION_CONSUMER_ENABLED:-true}
+      INVENTORY_TRANSACTION_EVENTS_QUEUE: ${INVENTORY_TRANSACTION_EVENTS_QUEUE:-wms.inventory.transaction-events}
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@inventory-service-db:5432/${INVENTORY_DB:-inventory_db}
     ports:
       - "3003:3003"
@@ -171,6 +177,10 @@ services:
       JWT_SECRET: ${JWT_SECRET:-change-me-super-secret}
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672
+      TRANSACTION_OUTBOX_PUBLISHER_ENABLED: ${TRANSACTION_OUTBOX_PUBLISHER_ENABLED:-true}
+      TRANSACTION_OUTBOX_EXCHANGE: ${TRANSACTION_OUTBOX_EXCHANGE:-wms.transaction.events}
+      TRANSACTION_OUTBOX_DEAD_EXCHANGE: ${TRANSACTION_OUTBOX_DEAD_EXCHANGE:-wms.transaction.events.dead}
+      TRANSACTION_OUTBOX_DEAD_QUEUE: ${TRANSACTION_OUTBOX_DEAD_QUEUE:-wms.transaction.events.dead}
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@transaction-service-db:5432/${TRANSACTION_DB:-transaction_db}
     ports:
       - "3004:3004"

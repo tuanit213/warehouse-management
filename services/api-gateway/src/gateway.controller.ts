@@ -5,12 +5,16 @@ const serviceMap: Record<string, string> = {
   products: 'http://product-service:3002/api',
   product: 'http://product-service:3002/api',
   categories: 'http://product-service:3002/api',
+  uploads: 'http://product-service:3002/api',
   inventory: 'http://inventory-service:3003/api',
   warehouses: 'http://inventory-service:3003/api',
   locations: 'http://inventory-service:3003/api',
   'stock-levels': 'http://inventory-service:3003/api',
   'stock-alerts': 'http://inventory-service:3003/api',
   'stock-movements': 'http://inventory-service:3003/api',
+  'stock-transfers': 'http://inventory-service:3003/api',
+  'stock-reservations': 'http://inventory-service:3003/api',
+  stocktakes: 'http://inventory-service:3003/api',
   transactions: 'http://transaction-service:3004/api',
   transaction: 'http://transaction-service:3004/api',
   suppliers: 'http://transaction-service:3004/api',
@@ -29,6 +33,7 @@ const downstreamServices = [
 ] as const;
 
 const publicPaths = ['/auth/login', '/auth/register', '/auth/refresh'];
+const publicPathPrefixes = ['/uploads/products/'];
 const rateLimitedPaths = new Set(['/auth/login', '/auth/register', '/auth/refresh', '/auth/logout']);
 const authAttempts = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT_WINDOW_MS = 60_000;
@@ -50,7 +55,7 @@ type Rule = { methods?: string[]; roles: Role[] };
 const rbacRules: Array<{ pattern: RegExp; rules: Rule[] }> = [
   { pattern: /^\/auth\/users(?:\/.*)?$/, rules: [{ roles: ['ADMIN'] }] },
   { pattern: /^\/reports?(?:\/.*)?$/, rules: [{ roles: ['ADMIN', 'MANAGER'] }] },
-  { pattern: /^\/(?:inventory|warehouses|locations|stock-levels|stock-alerts|stock-movements)(?:\/.*)?$/, rules: [{ methods: ['GET'], roles: ['ADMIN', 'MANAGER', 'WAREHOUSE_STAFF'] }, { roles: ['ADMIN', 'WAREHOUSE_STAFF'] }] },
+  { pattern: /^\/(?:inventory|warehouses|locations|stock-levels|stock-alerts|stock-movements|stock-transfers|stock-reservations|stocktakes)(?:\/.*)?$/, rules: [{ methods: ['GET'], roles: ['ADMIN', 'MANAGER', 'WAREHOUSE_STAFF'] }, { roles: ['ADMIN', 'WAREHOUSE_STAFF'] }] },
   { pattern: /^\/(?:transactions?|suppliers|inbounds|outbounds)(?:\/.*)?$/, rules: [{ methods: ['GET'], roles: ['ADMIN', 'MANAGER', 'WAREHOUSE_STAFF'] }, { roles: ['ADMIN', 'MANAGER', 'WAREHOUSE_STAFF'] }] },
   { pattern: /^\/products?(?:\/.*)?$/, rules: [{ methods: ['GET'], roles: ['ADMIN', 'MANAGER', 'WAREHOUSE_STAFF'] }, { roles: ['ADMIN', 'MANAGER'] }] },
   { pattern: /^\/categories(?:\/.*)?$/, rules: [{ methods: ['GET'], roles: ['ADMIN', 'MANAGER', 'WAREHOUSE_STAFF'] }, { roles: ['ADMIN', 'MANAGER'] }] },
@@ -102,7 +107,7 @@ export class GatewayController {
     if (!base) throw new HttpException({ message: 'No route for service', path: original, correlationId }, 404);
 
     let verified: VerifiedAuth | undefined;
-    if (publicPaths.includes(pathOnly)) this.checkRateLimit(req, pathOnly);
+    if (publicPaths.includes(pathOnly) || publicPathPrefixes.some((prefix) => pathOnly.startsWith(prefix))) this.checkRateLimit(req, pathOnly);
     else {
       verified = await this.verify(req, correlationId);
       this.authorize(req.method, pathOnly, verified.user.role, correlationId);

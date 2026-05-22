@@ -1,5 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
-import { AdjustStockDto, CreateLocationDto, CreateWarehouseDto, UpdateLocationDto, UpdateWarehouseDto, UpsertStockDto } from './dto';
+import { Body, Controller, Delete, Get, Headers, Param, Patch, Post, Query } from '@nestjs/common';
+import { AdjustStockDto, ApproveStocktakeDto, CreateLocationDto, CreateReservationDto, CreateStocktakeDto, CreateWarehouseDto, ReleaseReservationDto, ReservationQueryDto, TransferStockDto, UpdateLocationDto, UpdateStocktakeCountsDto, UpdateWarehouseDto, UpsertStockDto } from './dto';
 import { InventoryService } from './inventory.service';
 
 @Controller()
@@ -58,8 +58,61 @@ export class AppController {
   listMovements(@Query('productId') productId?: string, @Query('warehouseId') warehouseId?: string) { return this.inventory.listMovements(productId, warehouseId); }
 
   @Post('stock-levels')
-  upsertStock(@Body() dto: UpsertStockDto) { return this.inventory.upsertStock(dto); }
+  upsertStock(@Body() dto: UpsertStockDto, @Headers('x-user-id') userId?: string, @Headers('x-user-email') userEmail?: string) {
+    return this.inventory.upsertStock(dto, { userId, userEmail });
+  }
 
   @Post('stock-levels/adjust')
-  adjustStock(@Body() dto: AdjustStockDto) { return this.inventory.adjustStock(dto); }
+  adjustStock(@Body() dto: AdjustStockDto, @Headers('x-user-id') userId?: string, @Headers('x-user-email') userEmail?: string) {
+    return this.inventory.adjustStock(dto, { userId, userEmail });
+  }
+
+  @Post('stock-transfers')
+  transferStock(@Body() dto: TransferStockDto, @Headers('x-user-id') userId?: string, @Headers('x-user-email') userEmail?: string) {
+    return this.inventory.transferStock(dto, { userId, userEmail });
+  }
+
+  @Get('stock-reservations')
+  listReservations(@Query() query: ReservationQueryDto) { return this.inventory.listReservations(query); }
+
+  @Post('stock-reservations')
+  createReservation(@Body() dto: CreateReservationDto, @Headers('x-user-id') userId?: string, @Headers('x-user-email') userEmail?: string) {
+    return this.inventory.createReservation(dto, { userId, userEmail });
+  }
+
+  @Post('stock-reservations/:id/release')
+  releaseReservation(@Param('id') id: string, @Body() dto: ReleaseReservationDto, @Headers('x-user-id') userId?: string, @Headers('x-user-email') userEmail?: string) {
+    return this.inventory.releaseReservation(id, dto, { userId, userEmail });
+  }
+
+  @Post('stock-reservations/release-reference/:referenceType/:referenceId')
+  releaseReservationsForReference(@Param('referenceType') referenceType: string, @Param('referenceId') referenceId: string, @Body() dto: ReleaseReservationDto) {
+    return this.inventory.releaseReservationsForReference(referenceType, referenceId, dto?.reason);
+  }
+
+  @Post('stock-reservations/consume-reference/:referenceType/:referenceId')
+  consumeReservationsForReference(@Param('referenceType') referenceType: string, @Param('referenceId') referenceId: string, @Body() dto: ReleaseReservationDto) {
+    return this.inventory.consumeReservationsForReference(referenceType, referenceId, dto?.reason);
+  }
+
+  @Get('stocktakes')
+  listStocktakes() { return this.inventory.listStocktakes(); }
+
+  @Get('stocktakes/:id')
+  getStocktake(@Param('id') id: string) { return this.inventory.getStocktake(id); }
+
+  @Post('stocktakes')
+  createStocktake(@Body() dto: CreateStocktakeDto, @Headers('x-user-id') userId?: string, @Headers('x-user-email') userEmail?: string) {
+    return this.inventory.createStocktake(dto, { userId, userEmail });
+  }
+
+  @Patch('stocktakes/:id/counts')
+  updateStocktakeCounts(@Param('id') id: string, @Body() dto: UpdateStocktakeCountsDto, @Headers('x-user-id') userId?: string, @Headers('x-user-email') userEmail?: string) {
+    return this.inventory.updateStocktakeCounts(id, dto, { userId, userEmail });
+  }
+
+  @Post('stocktakes/:id/approve')
+  approveStocktake(@Param('id') id: string, @Body() dto: ApproveStocktakeDto, @Headers('x-user-id') userId?: string, @Headers('x-user-email') userEmail?: string) {
+    return this.inventory.approveStocktake(id, dto, { userId, userEmail });
+  }
 }

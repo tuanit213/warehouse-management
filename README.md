@@ -12,6 +12,12 @@ Hệ thống quản lý kho hàng cho doanh nghiệp vừa và nhỏ, thiết k�
 - Container: Docker Compose
 - Production readiness: health/readiness checks, smoke tests, GitHub Actions CI
 - Docker runtime: production builds for Frontend and NestJS services
+- Product images: local Docker volume via Product Service upload API; the DB stores stable image URLs, not base64 payloads.
+- Product catalog: CSV import/export for bulk SKU maintenance.
+- Inventory transfers: move stock between warehouses or bin locations with audit movements and negative-stock protection.
+- Reports: dashboard filters and true `.xlsx` exports for inventory, low stock, and movements.
+- Stock reservation and stocktake workflows are available through the Inventory API.
+- Observability profile: Prometheus and Grafana are available through `docker-compose.observability.yml`.
 
 ## Services
 
@@ -20,8 +26,8 @@ Hệ thống quản lý kho hàng cho doanh nghiệp vừa và nhỏ, thiết k�
 - auth-service: người dùng, đăng nhập, phân quyền
 - product-service: sản phẩm, SKU, danh mục
 - inventory-service: kho, vị trí, tồn kho, cảnh báo
-- transaction-service: nhập/xuất kho, lịch sử, PDF
-- report-service: dashboard, biểu đồ, export
+- transaction-service: nhập/xuất kho, lịch sử, PDF, durable outbox rows
+- report-service: dashboard, biểu đồ, report filters, Excel/PDF export
 
 ## Chạy nhanh
 
@@ -55,12 +61,36 @@ docker compose --env-file .env.production -f docker-compose.yml -f docker-compos
 ```
 
 Trước khi chạy thật, thay toàn bộ secret/password trong `.env.production`.
+Đặt `BOOTSTRAP_ADMIN_EMAIL` và `BOOTSTRAP_ADMIN_PASSWORD` riêng cho tài khoản quản trị đầu tiên; sau khi đăng nhập lần đầu nên đổi mật khẩu trong UI.
 
 Backup trước khi deploy hoặc nâng cấp:
 
 ```bash
 npm run prod:backup
 ```
+
+`npm run prod:env:check` reads `.env.production` directly and rejects placeholder/weak production secrets. `.env.production` is ignored by git; keep only `.env.production.example` in source control.
+
+Current quality gates:
+
+```bash
+npm run prod:env:check
+npm run prod:config
+npm run test:quality
+npm run test:regression
+npm run test:critical
+npm run migrate:dry-run
+npm run build --workspaces
+```
+
+Optional observability stack:
+
+```bash
+npm run observability:config
+docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.observability.yml --profile observability up -d
+```
+
+Grafana defaults to `http://localhost:3008`; set `GRAFANA_ADMIN_PASSWORD` in `.env.production` before enabling it.
 
 ## Tài liệu đồ án
 

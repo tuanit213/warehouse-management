@@ -62,6 +62,18 @@ export class TransactionService implements OnModuleInit {
         metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+      CREATE TABLE IF NOT EXISTS transaction_outbox_events (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        event_type VARCHAR(120) NOT NULL,
+        aggregate_id UUID NOT NULL,
+        payload JSONB NOT NULL,
+        status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+        attempts INT NOT NULL DEFAULT 0,
+        next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        published_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
       ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
       ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS total_quantity NUMERIC(14,2) NOT NULL DEFAULT 0;
       ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS total_value NUMERIC(14,2) NOT NULL DEFAULT 0;
@@ -96,6 +108,8 @@ export class TransactionService implements OnModuleInit {
       CREATE INDEX IF NOT EXISTS idx_stock_transaction_items_product ON stock_transaction_items(product_id);
       CREATE INDEX IF NOT EXISTS idx_stock_transaction_items_transaction ON stock_transaction_items(transaction_id);
       CREATE INDEX IF NOT EXISTS idx_transaction_audit_events_transaction_created ON transaction_audit_events(transaction_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_transaction_outbox_events_status_next_attempt ON transaction_outbox_events(status, next_attempt_at);
+      CREATE INDEX IF NOT EXISTS idx_transaction_outbox_events_aggregate ON transaction_outbox_events(aggregate_id, created_at DESC);
     `);
   }
 
@@ -109,6 +123,18 @@ export class TransactionService implements OnModuleInit {
     } catch {
       this.log('warn', 'audit_write_failed', { transactionId, event });
     }
+  }
+
+  private async enqueueOutbox(
+    client: { query: (sql: string, params?: unknown[]) => Promise<unknown> },
+    eventType: string,
+    aggregateId: string,
+    payload: Record<string, unknown>,
+  ) {
+    await client.query(
+      'INSERT INTO transaction_outbox_events(event_type, aggregate_id, payload) VALUES($1,$2,$3)',
+      [eventType, aggregateId, JSON.stringify(payload)],
+    );
   }
 
   private supplier(row: any) {
@@ -216,6 +242,12 @@ export class TransactionService implements OnModuleInit {
     const client = await this.db.connect();
     try {
       await client.query('BEGIN');
+      const duplicateKeys = new Set<string>();
+      for (const item of dto.items) {
+        const key = `${item.productId}:${item.locationId || 'NO_LOCATION'}`;
+        if (duplicateKeys.has(key)) throw new BadRequestException('Duplicate product/location line is not allowed');
+        duplicateKeys.add(key);
+      }
       if (dto.type === 'INBOUND' && dto.supplierId) {
         const supplier = await client.query('SELECT id FROM suppliers WHERE id=$1', [dto.supplierId]);
         if (!supplier.rowCount) throw new NotFoundException('Supplier not found');
@@ -233,6 +265,16 @@ export class TransactionService implements OnModuleInit {
           [transaction.rows[0].id, item.productId, item.locationId || null, item.quantity, item.unitPrice || 0],
         );
       }
+      await this.enqueueOutbox(client, 'transaction.created', transaction.rows[0].id, {
+        transactionId: transaction.rows[0].id,
+        type: dto.type,
+        code,
+        warehouseId: dto.warehouseId,
+        supplierId: dto.supplierId || null,
+        totalQuantity,
+        totalValue,
+        itemCount: dto.items.length,
+      });
       await client.query('COMMIT');
       return this.getTransaction(transaction.rows[0].id);
     } catch (error: any) {
@@ -279,9 +321,36 @@ export class TransactionService implements OnModuleInit {
         await this.adjustStock(transaction.warehouseId, item.productId, item.locationId, delta, item.id, transaction.id);
       }
 
-      await this.db.query('UPDATE stock_transactions SET status=$1, confirmed_at=NOW(), updated_at=NOW() WHERE id=$2', ['CONFIRMED', id]);
+      const client = await this.db.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('UPDATE stock_transactions SET status=$1, confirmed_at=NOW(), updated_at=NOW() WHERE id=$2', ['CONFIRMED', id]);
+        await this.enqueueOutbox(client, 'transaction.confirmed', id, {
+          transactionId: id,
+          type: transaction.type,
+          code: transaction.code,
+          warehouseId: transaction.warehouseId,
+          totalQuantity: transaction.totalQuantity,
+          totalValue: transaction.totalValue,
+          itemCount: transaction.items.length,
+          items: transaction.items.map((item) => ({
+            id: item.id,
+            productId: item.productId,
+            locationId: item.locationId || null,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+          })),
+        });
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
       this.log('info', 'confirm_completed', { transactionId: id });
       await this.audit(id, 'confirm_completed');
+      if (transaction.type === 'OUTBOUND') await this.consumeInventoryReservations(id);
       return this.getTransaction(id);
     } catch (error) {
       const message = this.sanitizeError(error);
@@ -291,6 +360,7 @@ export class TransactionService implements OnModuleInit {
       );
       this.log('error', 'confirm_failed', { transactionId: id, message });
       await this.audit(id, 'confirm_failed', { message });
+      await this.enqueueOutbox(this.db, 'transaction.confirm_failed', id, { transactionId: id, message });
       throw error;
     }
   }
@@ -299,17 +369,33 @@ export class TransactionService implements OnModuleInit {
     const transaction = await this.getTransaction(id);
     if (transaction.status === 'CANCELLED') throw new ConflictException('Transaction is already cancelled');
     if (transaction.status !== 'DRAFT') throw new ConflictException(`Only DRAFT transactions can be cancelled. Current status: ${transaction.status}`);
-    await this.db.query('UPDATE stock_transactions SET status=$1, updated_at=NOW() WHERE id=$2', ['CANCELLED', id]);
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('UPDATE stock_transactions SET status=$1, updated_at=NOW() WHERE id=$2', ['CANCELLED', id]);
+      await this.enqueueOutbox(client, 'transaction.cancelled', id, {
+        transactionId: id,
+        type: transaction.type,
+        code: transaction.code,
+        warehouseId: transaction.warehouseId,
+      });
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    await this.releaseInventoryReservations(id);
     return this.getTransaction(id);
   }
 
   async pdf(id: string) {
     const transaction = await this.getTransaction(id);
-    if (transaction.type !== 'INBOUND') throw new BadRequestException('PDF export is only available for inbound transactions');
     const supplier = transaction.supplierId ? await this.db.query('SELECT code, name, contact_name, phone, email, address FROM suppliers WHERE id=$1', [transaction.supplierId]) : null;
     const lines = [
       'WAREHOUSE MANAGEMENT SYSTEM',
-      'INBOUND VOUCHER',
+      `${transaction.type} VOUCHER`,
       '',
       `Voucher: ${transaction.code}`,
       `Status: ${transaction.status}`,
@@ -406,10 +492,39 @@ export class TransactionService implements OnModuleInit {
   }
 
   private async callInventory(path: string, options: RequestInit = {}) {
-    const response = await fetch(`${this.inventoryUrl}${path}`, { ...options, headers: { 'content-type': 'application/json', ...(options.headers || {}) } });
+    const response = await fetch(`${this.inventoryUrl}${path}`, {
+      ...options,
+      headers: {
+        'content-type': 'application/json',
+        ...(process.env.INTERNAL_GATEWAY_TOKEN ? { 'x-internal-gateway-token': process.env.INTERNAL_GATEWAY_TOKEN } : {}),
+        ...(options.headers || {}),
+      },
+    });
     const text = await response.text();
     const data = text ? JSON.parse(text) : null;
     if (!response.ok) throw new ConflictException(data?.message || `Inventory sync failed: ${response.status}`);
     return data;
+  }
+
+  private async releaseInventoryReservations(transactionId: string) {
+    try {
+      await this.callInventory(`/stock-reservations/release-reference/transaction/${transactionId}`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: 'Transaction cancelled' }),
+      });
+    } catch (error) {
+      this.log('warn', 'reservation_release_failed', { transactionId, message: this.sanitizeError(error) });
+    }
+  }
+
+  private async consumeInventoryReservations(transactionId: string) {
+    try {
+      await this.callInventory(`/stock-reservations/consume-reference/transaction/${transactionId}`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: 'Transaction confirmed' }),
+      });
+    } catch (error) {
+      this.log('warn', 'reservation_consume_failed', { transactionId, message: this.sanitizeError(error) });
+    }
   }
 }

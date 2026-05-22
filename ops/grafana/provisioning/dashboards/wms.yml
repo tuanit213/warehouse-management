@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: WMS
+    orgId: 1
+    folder: Warehouse Management System
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

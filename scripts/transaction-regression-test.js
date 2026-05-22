@@ -107,5 +107,34 @@ function failConfirm(transaction) {
     assert.match(source, /existing\.status === 'CONFIRMED'\) throw new ConflictException\('Transaction is already confirmed'\)/);
   });
 
+  await test('Transaction inventory sync includes internal gateway token', () => {
+    const source = fs.readFileSync(path.join(root, 'services/transaction-service/src/transaction.service.ts'), 'utf8');
+    assert.match(source, /x-internal-gateway-token/);
+    assert.match(source, /process\.env\.INTERNAL_GATEWAY_TOKEN/);
+  });
+
+  await test('Outbound reservation lifecycle is released on cancel and consumed on confirm', () => {
+    const source = fs.readFileSync(path.join(root, 'services/transaction-service/src/transaction.service.ts'), 'utf8');
+    assert.match(source, /releaseInventoryReservations/);
+    assert.match(source, /consumeInventoryReservations/);
+    assert.match(source, /stock-reservations\/release-reference\/transaction/);
+    assert.match(source, /stock-reservations\/consume-reference\/transaction/);
+    assert.match(source, /if \(transaction\.type === 'OUTBOUND'\) await this\.consumeInventoryReservations\(id\)/);
+  });
+
+  await test('Transaction outbox publisher drains events with RabbitMQ retry metadata', () => {
+    const moduleSource = fs.readFileSync(path.join(root, 'services/transaction-service/src/app.module.ts'), 'utf8');
+    const publisherSource = fs.readFileSync(path.join(root, 'services/transaction-service/src/transaction-outbox.publisher.ts'), 'utf8');
+    const serviceSource = fs.readFileSync(path.join(root, 'services/transaction-service/src/transaction.service.ts'), 'utf8');
+    assert.match(moduleSource, /TransactionOutboxPublisher/);
+    assert.match(serviceSource, /transaction\.confirmed/);
+    assert.match(serviceSource, /items: transaction\.items\.map/);
+    assert.match(publisherSource, /FOR UPDATE SKIP LOCKED/);
+    assert.match(publisherSource, /createConfirmChannel/);
+    assert.match(publisherSource, /deliveryMode: 2/);
+    assert.match(publisherSource, /TRANSACTION_OUTBOX_MAX_ATTEMPTS/);
+    assert.match(publisherSource, /wms\.transaction\.events\.dead/);
+  });
+
   if (process.exitCode) process.exit(1);
 })();

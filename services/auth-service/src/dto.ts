@@ -49,3 +49,8 @@ export class UpdateRoleDto {
   @IsIn(ROLES)
   role!: Role;
 }
+
+export class UpdateUserStatusDto {
+  @IsIn(['ACTIVE', 'DISABLED'])
+  status!: 'ACTIVE' | 'DISABLED';
+}

@@ -61,7 +61,7 @@ export function CommandPalette({
     { id: 'go-products', title: 'Di toi San pham', subtitle: 'Danh muc SKU, gia va hinh anh', icon: <Package size={16} />, keywords: 'products san pham sku', onSelect: () => onNavigate('products') },
     { id: 'go-warehouses', title: 'Di toi Kho', subtitle: 'Kho hang va diem luu tru', icon: <Warehouse size={16} />, keywords: 'warehouse kho hang', onSelect: () => onNavigate('warehouses') },
     { id: 'go-locations', title: 'Di toi Vi tri', subtitle: 'Vi tri trong tung kho', icon: <MapPin size={16} />, keywords: 'location vi tri kho', onSelect: () => onNavigate('locations') },
-    { id: 'go-inventory', title: 'Di toi Ton kho', subtitle: 'So luong, ton thap va movement', icon: <Boxes size={16} />, keywords: 'inventory ton kho stock', onSelect: () => onNavigate('inventory') },
+    { id: 'go-inventory', title: 'Đi tới Tồn kho', subtitle: 'Số lượng, tồn thấp và biến động kho', icon: <Boxes size={16} />, keywords: 'inventory ton kho stock', onSelect: () => onNavigate('inventory') },
     { id: 'go-suppliers', title: 'Di toi Nha cung cap', subtitle: 'Doi tac nhap hang', icon: <Truck size={16} />, keywords: 'supplier nha cung cap', onSelect: () => onNavigate('suppliers') },
     { id: 'go-inbound', title: 'Di toi Phieu nhap', subtitle: 'Tao va quan ly nhap kho', icon: <ArrowDownToLine size={16} />, keywords: 'inbound phieu nhap', onSelect: () => onNavigate('inbound') },
     { id: 'go-outbound', title: 'Di toi Phieu xuat', subtitle: 'Tao va quan ly xuat kho', icon: <ArrowUpFromLine size={16} />, keywords: 'outbound phieu xuat', onSelect: () => onNavigate('outbound') },
@@ -147,7 +147,7 @@ export function CommandPalette({
             />
             <kbd>{isMac ? '⌘' : 'Ctrl'} K</kbd>
           </div>
-          <div className="command-list" role="listbox" aria-label="Lenh kha dung">
+          <div className="command-list" role="listbox" aria-label="Lệnh khả dụng">
             {items.map((item, index) => (
               <button
                 key={item.id}
@@ -168,7 +168,7 @@ export function CommandPalette({
             {!items.length && (
               <EmptyState
                 icon={<Search size={18} />}
-                title="Khong co ket qua"
+                title="Không có kết quả"
                 description="Thu SKU, ten san pham hoac chon mot nghiep vu khac."
               />
             )}

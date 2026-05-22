@@ -16,13 +16,13 @@ export class AppController {
   }
 
   @Get('inventory-value')
-  inventoryValue() {
-    return this.reports.inventoryValue();
+  inventoryValue(@Query('productId') productId?: string, @Query('warehouseId') warehouseId?: string) {
+    return this.reports.inventoryValue(productId, warehouseId);
   }
 
   @Get('low-stock')
-  lowStock() {
-    return this.reports.lowStock();
+  lowStock(@Query('productId') productId?: string, @Query('warehouseId') warehouseId?: string) {
+    return this.reports.lowStock(productId, warehouseId);
   }
 
   @Get('stock-movements')
@@ -36,14 +36,22 @@ export class AppController {
   }
 
   @Get('export/excel')
-  @Header('content-type', 'text/csv; charset=utf-8')
-  exportExcel(@Query('kind') kind?: 'inventory' | 'low-stock' | 'movements') {
-    return this.reports.exportCsv(kind || 'inventory');
+  async exportExcel(
+    @Query('kind') kind: 'inventory' | 'low-stock' | 'movements' | undefined,
+    @Query('productId') productId: string | undefined,
+    @Query('warehouseId') warehouseId: string | undefined,
+    @Res() res: any,
+  ) {
+    const reportKind = kind || 'inventory';
+    const xlsx = await this.reports.exportXlsx(reportKind, productId, warehouseId);
+    res.setHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('content-disposition', `attachment; filename="wms-${reportKind}.xlsx"`);
+    return res.send(xlsx);
   }
 
   @Get('export/pdf')
-  async exportPdf(@Res() res: any) {
-    const pdf = await this.reports.exportPdfBuffer();
+  async exportPdf(@Query('productId') productId: string | undefined, @Query('warehouseId') warehouseId: string | undefined, @Res() res: any) {
+    const pdf = await this.reports.exportPdfBuffer(productId, warehouseId);
     res.setHeader('content-type', 'application/pdf');
     res.setHeader('content-disposition', 'attachment; filename="wms-report.pdf"');
     return res.send(pdf);

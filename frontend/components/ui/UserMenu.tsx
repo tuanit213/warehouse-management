@@ -1,12 +1,13 @@
 'use client';
 
-import { LogOut, Moon, Sun } from 'lucide-react';
+import { KeyRound, LogOut, Moon, Sun } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 type UserMenuProps = {
   user: { email: string; fullName?: string; role: string };
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
+  onChangePassword: () => void;
   onLogout: () => void;
 };
 
@@ -20,7 +21,7 @@ function initials(user: UserMenuProps['user']) {
     .join('') || 'U';
 }
 
-export function UserMenu({ user, theme, onToggleTheme, onLogout }: UserMenuProps) {
+export function UserMenu({ user, theme, onToggleTheme, onChangePassword, onLogout }: UserMenuProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -56,7 +57,7 @@ export function UserMenu({ user, theme, onToggleTheme, onLogout }: UserMenuProps
         </span>
       </button>
       {open && (
-        <section className="user-menu-panel" role="menu" aria-label="Tai khoan">
+        <section className="user-menu-panel" role="menu" aria-label="Tài khoản">
           <div className="user-menu-profile">
             <span className="user-avatar large">{initials(user)}</span>
             <div>
@@ -67,12 +68,16 @@ export function UserMenu({ user, theme, onToggleTheme, onLogout }: UserMenuProps
           </div>
           <button className="user-menu-item" type="button" role="menuitem" onClick={onToggleTheme}>
             {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-            <span>{theme === 'dark' ? 'Chuyen sang Light' : 'Chuyen sang Dark'}</span>
+            <span>{theme === 'dark' ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'}</span>
             <span className={theme === 'dark' ? 'switch mini is-on' : 'switch mini'} aria-hidden="true"><span /></span>
+          </button>
+          <button className="user-menu-item" type="button" role="menuitem" onClick={onChangePassword}>
+            <KeyRound size={16} />
+            <span>Đổi mật khẩu</span>
           </button>
           <button className="user-menu-item danger-item" type="button" role="menuitem" onClick={onLogout}>
             <LogOut size={16} />
-            <span>Dang xuat</span>
+            <span>Đăng xuất</span>
           </button>
         </section>
       )}

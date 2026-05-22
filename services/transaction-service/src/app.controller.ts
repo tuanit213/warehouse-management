@@ -61,4 +61,12 @@ export class AppController {
 
   @Post('outbounds/:id/cancel')
   cancelOutbound(@Param('id') id: string) { return this.transactions.cancelTransaction(id); }
+
+  @Get('outbounds/:id/pdf')
+  async outboundPdf(@Param('id') id: string, @Res() res: any) {
+    const pdf = await this.transactions.pdf(id);
+    res.setHeader('content-type', 'application/pdf');
+    res.setHeader('content-disposition', `inline; filename="outbound-${id}.pdf"`);
+    return res.send(pdf);
+  }
 }

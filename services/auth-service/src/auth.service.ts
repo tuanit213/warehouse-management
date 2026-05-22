@@ -4,7 +4,7 @@ import { randomBytes, randomUUID } from 'crypto';
 import { Pool } from 'pg';
 import * as bcrypt from 'bcryptjs';
 import { PG_POOL } from './database';
-import { ChangePasswordDto, LoginDto, LogoutDto, RefreshTokenDto, RegisterDto, Role, UpdateRoleDto } from './dto';
+import { ChangePasswordDto, LoginDto, LogoutDto, RefreshTokenDto, RegisterDto, Role, UpdateRoleDto, UpdateUserStatusDto } from './dto';
 
 type JwtPayload = { sub: string; email: string; role: Role; fullName: string };
 
@@ -14,6 +14,7 @@ export class AuthService implements OnModuleInit {
 
   async onModuleInit() {
     await this.ensureSchema();
+    await this.ensureBootstrapAdmin();
   }
 
   private async ensureSchema() {
@@ -86,6 +87,38 @@ export class AuthService implements OnModuleInit {
     } catch {
       this.log('warn', 'audit_write_failed', { event });
     }
+  }
+
+  private async ensureBootstrapAdmin() {
+    const email = (process.env.BOOTSTRAP_ADMIN_EMAIL || '').trim().toLowerCase();
+    const password = process.env.BOOTSTRAP_ADMIN_PASSWORD || '';
+    const fullName = (process.env.BOOTSTRAP_ADMIN_NAME || 'Bootstrap Admin').trim();
+    if (!email && !password) return;
+    if (!email || !password) {
+      this.log('warn', 'bootstrap_admin_incomplete');
+      return;
+    }
+    if (password.length < 12) {
+      this.log('warn', 'bootstrap_admin_password_rejected', { email });
+      return;
+    }
+    const existing = await this.db.query('SELECT id, role, status FROM users WHERE lower(email)=lower($1)', [email]);
+    if (existing.rowCount) {
+      const current = existing.rows[0];
+      if (current.role !== 'ADMIN' || current.status !== 'ACTIVE') {
+        await this.db.query('UPDATE users SET role=$1, status=$2 WHERE id=$3', ['ADMIN', 'ACTIVE', current.id]);
+        await this.audit('bootstrap_admin_promoted', current.id, { email });
+        this.log('info', 'bootstrap_admin_promoted', { email });
+      }
+      return;
+    }
+    const passwordHash = await bcrypt.hash(password, 12);
+    const result = await this.db.query(
+      'INSERT INTO users(email, password_hash, full_name, role, status) VALUES($1,$2,$3,$4,$5) RETURNING id',
+      [email, passwordHash, fullName, 'ADMIN', 'ACTIVE'],
+    );
+    await this.audit('bootstrap_admin_created', result.rows[0].id, { email });
+    this.log('info', 'bootstrap_admin_created', { email });
   }
 
   private parseRefreshToken(refreshToken: string) {
@@ -270,6 +303,17 @@ export class AuthService implements OnModuleInit {
     await this.db.query('UPDATE refresh_tokens SET revoked_at=NOW() WHERE user_id=$1 AND revoked_at IS NULL', [id]);
     this.log('info', 'role_changed', { actorId: currentUser.id, userId: id, role: dto.role });
     await this.audit('role_changed', id, { actorId: currentUser.id, role: dto.role });
+    return this.sanitize(result.rows[0]);
+  }
+
+  async updateStatus(currentUser: any, id: string, dto: UpdateUserStatusDto) {
+    if (currentUser.role !== 'ADMIN') throw new ForbiddenException('Admin role required');
+    if (currentUser.id === id && dto.status === 'DISABLED') throw new ConflictException('Admin cannot disable own account');
+    const result = await this.db.query('UPDATE users SET status=$1 WHERE id=$2 RETURNING *', [dto.status, id]);
+    if (!result.rowCount) throw new NotFoundException('User not found');
+    if (dto.status === 'DISABLED') await this.db.query('UPDATE refresh_tokens SET revoked_at=NOW() WHERE user_id=$1 AND revoked_at IS NULL', [id]);
+    this.log('info', 'user_status_changed', { actorId: currentUser.id, userId: id, status: dto.status });
+    await this.audit('user_status_changed', id, { actorId: currentUser.id, status: dto.status });
     return this.sanitize(result.rows[0]);
   }
 }

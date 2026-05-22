@@ -1,5 +1,5 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-CREATE TABLE IF NOT EXISTS categories (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), name VARCHAR(255) NOT NULL, parent_id UUID NULL REFERENCES categories(id));
+CREATE TABLE IF NOT EXISTS categories (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), name VARCHAR(255) UNIQUE NOT NULL, parent_id UUID NULL REFERENCES categories(id));
 CREATE TABLE IF NOT EXISTS products (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   sku VARCHAR(100) UNIQUE NOT NULL,
@@ -22,3 +22,5 @@ CREATE TABLE IF NOT EXISTS products (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_categories_name_lower ON categories(lower(name));
+CREATE UNIQUE INDEX IF NOT EXISTS ux_products_barcode_not_null ON products(barcode) WHERE barcode IS NOT NULL;

@@ -10,7 +10,7 @@ The WMS uses one PostgreSQL database per bounded context:
 - transaction_db
 - report_db
 
-Backups are logical SQL dumps created with `pg_dump` from each running database container.
+Backups are logical SQL dumps created with `pg_dump` from each running database container. Product image uploads are copied from the Product Service upload volume into the same backup folder.
 
 ## Create backup
 
@@ -20,23 +20,17 @@ For development defaults:
 .\scripts\backup-production.ps1
 ```
 
-For production, load the same environment values used by deployment before running.
-At minimum set:
+For production, the script loads `.env.production` by default. You can pass another env file:
 
 ```powershell
-$env:POSTGRES_USER='wms_prod'
-$env:AUTH_DB='auth_db'
-$env:PRODUCT_DB='product_db'
-$env:INVENTORY_DB='inventory_db'
-$env:TRANSACTION_DB='transaction_db'
-$env:REPORT_DB='report_db'
-.\scripts\backup-production.ps1
+.\scripts\backup-production.ps1 -EnvFile .\.env.production
 ```
 
 Output path:
 
 ```txt
 backups/<yyyyMMdd-HHmmss>/<database>.sql
+backups/<yyyyMMdd-HHmmss>/product-uploads/
 ```
 
 ## Restore backup
@@ -47,6 +41,8 @@ backups/<yyyyMMdd-HHmmss>/<database>.sql
 ```powershell
 .\scripts\restore-production.ps1 -BackupPath .\backups\20260513-230000
 ```
+
+If `product-uploads/` exists in the backup folder, restore copies those files back to `/app/uploads/products` in the Product Service container.
 
 ## Recommended production policy
 

@@ -1,7 +1,23 @@
+const fs = require('node:fs');
+const path = require('node:path');
+
+function loadEnvFile(file) {
+  if (!fs.existsSync(file)) return;
+  for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+    if (!match || process.env[match[1]]) continue;
+    process.env[match[1]] = match[2].replace(/^['"]|['"]$/g, '');
+  }
+}
+
+loadEnvFile(path.resolve(__dirname, '..', '.env.production'));
+
 const API = process.env.API_URL || 'http://localhost:3000/api';
 const FRONTEND = process.env.FRONTEND_URL || 'http://localhost:3006';
-const email = process.env.DEMO_ADMIN_EMAIL || 'admin@wms.local';
-const password = process.env.DEMO_ADMIN_PASSWORD || 'Password@123';
+const email = process.env.DEMO_ADMIN_EMAIL || process.env.BOOTSTRAP_ADMIN_EMAIL || 'admin@wms.local';
+const password = process.env.DEMO_ADMIN_PASSWORD || process.env.BOOTSTRAP_ADMIN_PASSWORD || process.env.POSTGRES_PASSWORD || 'Password@123';
 
 async function assertOk(name, fn) {
   try {
@@ -38,9 +54,21 @@ async function ensureProduct(headers) {
   return found || request(`${API}/products`, { method: 'POST', headers, body: JSON.stringify({ sku: 'SMOKE-TX-SKU', name: 'Smoke transaction SKU', unit: 'cái', costPrice: 1000 }) });
 }
 
-async function ensureLocation(headers, warehouse) {
+async function ensureLocation(headers, warehouse, code = 'SMOKE-LOC', description = 'Smoke test location') {
   const locations = await request(`${API}/warehouses/${warehouse.id}/locations`, { headers });
-  return locations.find((item) => item.code === 'SMOKE-LOC') || request(`${API}/warehouses/${warehouse.id}/locations`, { method: 'POST', headers, body: JSON.stringify({ code: 'SMOKE-LOC', description: 'Vị trí smoke test' }) });
+  return locations.find((item) => item.code === code) || request(`${API}/warehouses/${warehouse.id}/locations`, { method: 'POST', headers, body: JSON.stringify({ code, description }) });
+}
+
+async function upsertSmokeStock(headers, payload) {
+  try {
+    return await request(`${API}/stock-levels`, { method: 'POST', headers, body: JSON.stringify({ ...payload, reason: 'Smoke test stock baseline' }) });
+  } catch (error) {
+    const messages = Array.isArray(error.data?.message) ? error.data.message : [];
+    if (messages.some((message) => /property reason should not exist/.test(message))) {
+      return request(`${API}/stock-levels`, { method: 'POST', headers, body: JSON.stringify(payload) });
+    }
+    throw error;
+  }
 }
 
 (async () => {
@@ -53,11 +81,18 @@ async function ensureLocation(headers, warehouse) {
 
   await assertOk('Auth /me via Gateway', () => request(`${API}/auth/me`, { headers }));
   await assertOk('Product list via Gateway + PostgreSQL', () => request(`${API}/products?page=1&limit=5`, { headers }));
+  await assertOk('Product CSV export via Gateway', async () => {
+    const csv = await requestBuffer(`${API}/products/export/csv`, { headers });
+    if (!csv.contentType.includes('text/csv')) throw new Error(`Unexpected product CSV content type: ${csv.contentType}`);
+    if (!csv.buffer.toString('utf8').includes('sku,name,unit')) throw new Error('Product CSV export does not include expected header');
+  });
   await assertOk('Categories via Gateway + PostgreSQL', () => request(`${API}/categories`, { headers }));
 
   const warehouses = await assertOk('Warehouses via Gateway + PostgreSQL', () => request(`${API}/warehouses`, { headers }));
   const warehouse = warehouses.find((item) => item.code === 'SMOKE-WH') || await request(`${API}/warehouses`, { method: 'POST', headers, body: JSON.stringify({ code: 'SMOKE-WH', name: 'Kho smoke test', address: 'Demo smoke test' }) });
   const location = await assertOk('Warehouse locations via Gateway', () => ensureLocation(headers, warehouse));
+  const transferWarehouse = warehouses.find((item) => item.code === 'SMOKE-WH-TRANSFER') || await request(`${API}/warehouses`, { method: 'POST', headers, body: JSON.stringify({ code: 'SMOKE-WH-TRANSFER', name: 'Transfer smoke warehouse', address: 'Demo smoke test' }) });
+  const transferLocation = await assertOk('Transfer warehouse locations via Gateway', () => ensureLocation(headers, transferWarehouse, 'SMOKE-TRANSFER-LOC', 'Smoke transfer destination'));
   await assertOk('Stock levels via Gateway', () => request(`${API}/stock-levels`, { headers }));
   await assertOk('Low stock alerts via Gateway', () => request(`${API}/stock-alerts/low-stock`, { headers }));
 
@@ -65,9 +100,9 @@ async function ensureLocation(headers, warehouse) {
   const suppliers = await assertOk('Suppliers via Gateway', () => request(`${API}/suppliers`, { headers }));
   const supplier = suppliers.find((item) => item.code === 'SMOKE-SUP') || await request(`${API}/suppliers`, { method: 'POST', headers, body: JSON.stringify({ code: 'SMOKE-SUP', name: 'Nhà cung cấp smoke', phone: '0900000000' }) });
 
-  await assertOk('Seed deterministic smoke stock', () => request(`${API}/stock-levels`, { method: 'POST', headers, body: JSON.stringify({ productId: product.id, warehouseId: warehouse.id, locationId: location.id, quantity: 100, minQuantity: 0 }) }));
+  await assertOk('Seed deterministic smoke stock', () => upsertSmokeStock(headers, { productId: product.id, warehouseId: warehouse.id, locationId: location.id, quantity: 100, minQuantity: 0 }));
   const beforeStock = await request(`${API}/stock-levels?warehouseId=${warehouse.id}&productId=${product.id}`, { headers });
-  const stockAtLocation = (rows) => Number(rows.find((item) => item.locationId === location.id)?.quantity || 0);
+  const stockAtLocation = (rows, locationId = location.id) => Number(rows.find((item) => item.locationId === locationId)?.quantity || 0);
   const beforeQuantity = stockAtLocation(beforeStock);
 
   const inbound = await assertOk('Create inbound draft', () => request(`${API}/inbounds`, { method: 'POST', headers, body: JSON.stringify({ warehouseId: warehouse.id, supplierId: supplier.id, note: 'Smoke inbound', items: [{ productId: product.id, locationId: location.id, quantity: 10, unitPrice: 1000 }] }) }));
@@ -91,11 +126,34 @@ async function ensureLocation(headers, warehouse) {
   });
   const outboundQuantity = stockAtLocation(await request(`${API}/stock-levels?warehouseId=${warehouse.id}&productId=${product.id}`, { headers }));
   if (outboundQuantity !== inboundQuantity - 2) throw new Error('Outbound did not decrease stock at smoke location');
+  const transferDestinationBefore = stockAtLocation(await request(`${API}/stock-levels?warehouseId=${transferWarehouse.id}&productId=${product.id}`, { headers }), transferLocation.id);
+  await assertOk('Transfer stock between warehouses via Gateway', () => request(`${API}/stock-transfers`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      productId: product.id,
+      fromWarehouseId: warehouse.id,
+      fromLocationId: location.id,
+      toWarehouseId: transferWarehouse.id,
+      toLocationId: transferLocation.id,
+      quantity: 3,
+      reason: 'Smoke stock transfer',
+    }),
+  }));
+  const sourceAfterTransfer = stockAtLocation(await request(`${API}/stock-levels?warehouseId=${warehouse.id}&productId=${product.id}`, { headers }));
+  const destinationAfterTransfer = stockAtLocation(await request(`${API}/stock-levels?warehouseId=${transferWarehouse.id}&productId=${product.id}`, { headers }), transferLocation.id);
+  if (sourceAfterTransfer !== outboundQuantity - 3) throw new Error('Stock transfer did not decrease source location');
+  if (destinationAfterTransfer !== transferDestinationBefore + 3) throw new Error('Stock transfer did not increase destination location');
   await assertOk('Stock movements via Gateway', () => request(`${API}/stock-movements?warehouseId=${warehouse.id}&productId=${product.id}`, { headers }));
   await assertOk('Report summary via Gateway', () => request(`${API}/reports/summary`, { headers }));
   await assertOk('Report low stock via Gateway', () => request(`${API}/reports/low-stock`, { headers }));
   await assertOk('Report stock movements via Gateway', () => request(`${API}/reports/stock-movements`, { headers }));
-  await assertOk('Report movement export via Gateway', () => request(`${API}/reports/export/excel?kind=movements`, { headers }));
+  await assertOk('Report movement Excel export via Gateway', async () => {
+    const xlsx = await requestBuffer(`${API}/reports/export/excel?kind=movements`, { headers });
+    if (!xlsx.contentType.includes('spreadsheetml.sheet')) throw new Error(`Unexpected Excel content type: ${xlsx.contentType}`);
+    if (xlsx.buffer.subarray(0, 2).toString('utf8') !== 'PK') throw new Error('Excel export is not an XLSX/ZIP response');
+    if (xlsx.buffer.length < 1000) throw new Error('Excel export response is unexpectedly small');
+  });
 
   await assertOk('Transactions via Gateway', () => request(`${API}/transactions`, { headers }));
   console.log('\nSmoke test passed. Demo is ready.');

@@ -1,7 +1,23 @@
+const fs = require('node:fs');
+const path = require('node:path');
+
+function loadEnvFile(file) {
+  if (!fs.existsSync(file)) return;
+  for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+    if (!match || process.env[match[1]]) continue;
+    process.env[match[1]] = match[2].replace(/^['"]|['"]$/g, '');
+  }
+}
+
+loadEnvFile(path.resolve(__dirname, '..', '.env.production'));
+
 const API = process.env.API_URL || 'http://localhost:3000/api';
 const admin = {
-  email: process.env.DEMO_ADMIN_EMAIL || 'admin@wms.local',
-  password: process.env.DEMO_ADMIN_PASSWORD || 'Password@123',
+  email: process.env.DEMO_ADMIN_EMAIL || process.env.BOOTSTRAP_ADMIN_EMAIL || 'admin@wms.local',
+  password: process.env.DEMO_ADMIN_PASSWORD || process.env.BOOTSTRAP_ADMIN_PASSWORD || process.env.POSTGRES_PASSWORD || 'Password@123',
   fullName: 'Demo Admin',
   role: 'ADMIN',
 };
@@ -90,7 +106,7 @@ async function main() {
     { productId: products[2].id, warehouseId: hn.id, locationId: hn01.id, quantity: 6, minQuantity: 10 },
   ];
   for (const stock of stockInputs) {
-    await request('/stock-levels', { method: 'POST', headers, body: JSON.stringify(stock) });
+    await request('/stock-levels', { method: 'POST', headers, body: JSON.stringify({ ...stock, reason: 'Seed demo stock baseline' }) });
     console.log(`Stock ready: ${stock.productId} @ ${stock.warehouseId}`);
   }
 

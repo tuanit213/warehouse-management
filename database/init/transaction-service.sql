@@ -48,6 +48,19 @@ CREATE TABLE IF NOT EXISTS transaction_audit_events (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS transaction_outbox_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_type VARCHAR(120) NOT NULL,
+  aggregate_id UUID NOT NULL,
+  payload JSONB NOT NULL,
+  status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+  attempts INT NOT NULL DEFAULT 0,
+  next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  published_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS total_quantity NUMERIC(14,2) NOT NULL DEFAULT 0;
 ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS total_value NUMERIC(14,2) NOT NULL DEFAULT 0;
@@ -77,6 +90,8 @@ CREATE INDEX IF NOT EXISTS idx_stock_transactions_type ON stock_transactions(typ
 CREATE INDEX IF NOT EXISTS idx_stock_transactions_status ON stock_transactions(status);
 CREATE INDEX IF NOT EXISTS idx_stock_transactions_status_confirming_started ON stock_transactions(status, confirming_started_at);
 CREATE INDEX IF NOT EXISTS idx_transaction_audit_events_transaction_created ON transaction_audit_events(transaction_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_transaction_outbox_events_status_next_attempt ON transaction_outbox_events(status, next_attempt_at);
+CREATE INDEX IF NOT EXISTS idx_transaction_outbox_events_aggregate ON transaction_outbox_events(aggregate_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_stock_transactions_warehouse ON stock_transactions(warehouse_id);
 CREATE INDEX IF NOT EXISTS idx_stock_transactions_supplier ON stock_transactions(supplier_id);
 CREATE INDEX IF NOT EXISTS idx_stock_transaction_items_product ON stock_transaction_items(product_id);
