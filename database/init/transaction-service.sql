@@ -18,11 +18,14 @@ CREATE TABLE IF NOT EXISTS stock_transactions (
   code VARCHAR(50) UNIQUE NOT NULL,
   warehouse_id UUID NOT NULL,
   supplier_id UUID NULL,
-  status VARCHAR(30) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'CONFIRMED', 'CANCELLED')),
+  status VARCHAR(30) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'CONFIRMING', 'CONFIRM_FAILED', 'CONFIRMED', 'CANCELLED')),
   note TEXT,
   total_quantity NUMERIC(14,2) NOT NULL DEFAULT 0,
   total_value NUMERIC(14,2) NOT NULL DEFAULT 0,
   confirmed_at TIMESTAMPTZ,
+  confirm_error TEXT,
+  confirm_attempts INT NOT NULL DEFAULT 0,
+  confirming_started_at TIMESTAMPTZ,
   created_by UUID,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -37,17 +40,28 @@ CREATE TABLE IF NOT EXISTS stock_transaction_items (
   unit_price NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (unit_price >= 0)
 );
 
+CREATE TABLE IF NOT EXISTS transaction_audit_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  transaction_id UUID NULL,
+  event VARCHAR(80) NOT NULL,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS total_quantity NUMERIC(14,2) NOT NULL DEFAULT 0;
 ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS total_value NUMERIC(14,2) NOT NULL DEFAULT 0;
 ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ;
+ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS confirm_error TEXT;
+ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS confirm_attempts INT NOT NULL DEFAULT 0;
+ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS confirming_started_at TIMESTAMPTZ;
 ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 ALTER TABLE stock_transaction_items ADD COLUMN IF NOT EXISTS location_id UUID NULL;
 
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_stock_transactions_status') THEN
-    ALTER TABLE stock_transactions ADD CONSTRAINT chk_stock_transactions_status CHECK (status IN ('DRAFT', 'CONFIRMED', 'CANCELLED'));
+    ALTER TABLE stock_transactions ADD CONSTRAINT chk_stock_transactions_status CHECK (status IN ('DRAFT', 'CONFIRMING', 'CONFIRM_FAILED', 'CONFIRMED', 'CANCELLED'));
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_stock_transactions_type') THEN
     ALTER TABLE stock_transactions ADD CONSTRAINT chk_stock_transactions_type CHECK (type IN ('INBOUND', 'OUTBOUND'));
@@ -61,6 +75,8 @@ UPDATE stock_transactions SET status = 'CONFIRMED', confirmed_at = COALESCE(conf
 
 CREATE INDEX IF NOT EXISTS idx_stock_transactions_type ON stock_transactions(type);
 CREATE INDEX IF NOT EXISTS idx_stock_transactions_status ON stock_transactions(status);
+CREATE INDEX IF NOT EXISTS idx_stock_transactions_status_confirming_started ON stock_transactions(status, confirming_started_at);
+CREATE INDEX IF NOT EXISTS idx_transaction_audit_events_transaction_created ON transaction_audit_events(transaction_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_stock_transactions_warehouse ON stock_transactions(warehouse_id);
 CREATE INDEX IF NOT EXISTS idx_stock_transactions_supplier ON stock_transactions(supplier_id);
 CREATE INDEX IF NOT EXISTS idx_stock_transaction_items_product ON stock_transaction_items(product_id);

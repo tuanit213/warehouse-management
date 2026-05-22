@@ -24,8 +24,7 @@ CREATE TABLE IF NOT EXISTS stock_levels (
   location_id UUID NULL REFERENCES warehouse_locations(id) ON DELETE SET NULL,
   quantity NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (quantity >= 0),
   min_quantity NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (min_quantity >= 0),
-  last_movement_at TIMESTAMPTZ,
-  UNIQUE (product_id, warehouse_id, location_id)
+  last_movement_at TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS stock_movements (
@@ -39,6 +38,13 @@ CREATE TABLE IF NOT EXISTS stock_movements (
   reference_type VARCHAR(50),
   reference_id UUID,
   note TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS inventory_audit_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  event VARCHAR(80) NOT NULL,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -60,7 +66,43 @@ CREATE INDEX IF NOT EXISTS idx_stock_levels_last_movement ON stock_levels(last_m
 CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(product_id);
 CREATE INDEX IF NOT EXISTS idx_stock_movements_warehouse ON stock_movements(warehouse_id);
 CREATE INDEX IF NOT EXISTS idx_stock_movements_reference ON stock_movements(reference_type, reference_id);
+WITH duplicate_stock AS (
+  SELECT
+    MIN(id::text)::uuid AS keep_id,
+    product_id,
+    warehouse_id,
+    location_id,
+    SUM(quantity) AS quantity,
+    MAX(min_quantity) AS min_quantity,
+    MAX(last_movement_at) AS last_movement_at
+  FROM stock_levels
+  GROUP BY product_id, warehouse_id, location_id
+  HAVING COUNT(*) > 1
+),
+merged AS (
+  UPDATE stock_levels s
+  SET
+    quantity = d.quantity,
+    min_quantity = d.min_quantity,
+    last_movement_at = d.last_movement_at
+  FROM duplicate_stock d
+  WHERE s.id = d.keep_id
+  RETURNING s.id
+)
+DELETE FROM stock_levels s
+USING duplicate_stock d
+WHERE s.product_id = d.product_id
+  AND s.warehouse_id = d.warehouse_id
+  AND s.location_id IS NOT DISTINCT FROM d.location_id
+  AND s.id <> d.keep_id;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_stock_levels_product_warehouse_location
+  ON stock_levels(product_id, warehouse_id, location_id) NULLS NOT DISTINCT;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_stock_movements_transaction_reference
+  ON stock_movements(reference_type, reference_id, product_id, warehouse_id, location_id)
+  NULLS NOT DISTINCT
+  WHERE reference_type = 'transaction' AND reference_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_stock_movements_created ON stock_movements(created_at);
+CREATE INDEX IF NOT EXISTS idx_inventory_audit_events_event_created ON inventory_audit_events(event, created_at DESC);
 
 INSERT INTO warehouses (id, code, name, address) VALUES
   ('11111111-1111-1111-1111-111111111111', 'WH-HCM', 'Kho Hồ Chí Minh', 'Khu công nghiệp Tân Bình, TP.HCM'),
@@ -77,7 +119,10 @@ INSERT INTO stock_levels (id, product_id, warehouse_id, location_id, quantity, m
   ('33333333-3333-3333-3333-333333333331', '00000000-0000-0000-0000-000000000101', '11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1', 12, 20, NOW() - INTERVAL '45 days'),
   ('33333333-3333-3333-3333-333333333332', '00000000-0000-0000-0000-000000000102', '11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2', 80, 15, NOW() - INTERVAL '5 days'),
   ('33333333-3333-3333-3333-333333333333', '00000000-0000-0000-0000-000000000103', '22222222-2222-2222-2222-222222222222', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1', 6, 10, NOW() - INTERVAL '70 days')
-ON CONFLICT (product_id, warehouse_id, location_id) DO UPDATE SET
+ON CONFLICT (id) DO UPDATE SET
+  product_id = EXCLUDED.product_id,
+  warehouse_id = EXCLUDED.warehouse_id,
+  location_id = EXCLUDED.location_id,
   quantity = EXCLUDED.quantity,
   min_quantity = EXCLUDED.min_quantity,
   last_movement_at = EXCLUDED.last_movement_at;
