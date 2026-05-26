@@ -31,6 +31,7 @@ body {
   margin: 0;
   min-width: 320px;
   overflow: hidden;
+  overscroll-behavior: none;
   background: #f4f4f5;
   color: #18181b;
   font-family: inherit;
@@ -101,7 +102,9 @@ main {
   --shadow-modal: 0 24px 64px rgba(0, 0, 0, .28);
   --focus-ring: 0 0 0 3px color-mix(in srgb, var(--brand) 20%, transparent);
   height: 100vh;
+  height: 100dvh;
   min-height: 100vh;
+  min-height: 100dvh;
   overflow: hidden;
   background: var(--bg);
   color: var(--text);
@@ -366,6 +369,7 @@ td button.danger:hover {
   height: var(--header-height);
   background: var(--surface);
   border-bottom: 1px solid var(--line);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--line) 72%, transparent);
 }
 
 .nav {
@@ -833,6 +837,7 @@ kbd,
 
 .app-layout {
   height: calc(100vh - var(--header-height));
+  height: calc(100dvh - var(--header-height));
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr);
   gap: var(--space-4);
@@ -847,6 +852,8 @@ kbd,
   align-content: start;
   gap: var(--space-1);
   overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   padding: var(--space-3);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
@@ -922,6 +929,8 @@ kbd,
   min-width: 0;
   height: 100%;
   overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .content-panel {
@@ -943,6 +952,8 @@ kbd,
 
 .screen-header {
   margin-bottom: var(--space-5);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--line);
 }
 
 .screen-header h1,
@@ -1064,10 +1075,11 @@ kbd,
 .metric-card strong {
   display: block;
   margin-top: var(--space-2);
-  font-size: 30px;
+  font-size: clamp(24px, 3vw, 30px);
   line-height: 1;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 /* Forms */
@@ -1216,6 +1228,7 @@ textarea:focus {
 
 .toolbar-note {
   align-self: center;
+  min-width: 0;
   color: var(--muted);
   font-size: 13px;
   font-weight: 500;
@@ -1255,6 +1268,7 @@ textarea:focus {
   grid-template-columns: minmax(0, 1fr) auto auto auto;
   gap: var(--space-2);
   align-items: center;
+  min-width: 0;
 }
 
 .file-action {
@@ -1353,6 +1367,8 @@ textarea:focus {
 /* Tables */
 .table-wrap {
   overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   border-radius: var(--radius-lg);
   background: var(--surface);
 }
@@ -1375,6 +1391,7 @@ td {
   border-bottom: 1px solid var(--line);
   vertical-align: middle;
   text-align: left;
+  overflow-wrap: anywhere;
 }
 
 thead th {
@@ -1421,6 +1438,7 @@ td small {
 
 .product-table-wrap {
   max-height: calc(100vh - 270px);
+  max-height: calc(100dvh - 270px);
   overflow: auto;
 }
 
@@ -1534,6 +1552,7 @@ td small {
 .product-row-actions button {
   min-height: 32px;
   padding: 0 10px;
+  white-space: nowrap;
 }
 
 .product-row-actions .subtle-danger {
@@ -1594,6 +1613,7 @@ td small {
   margin-top: var(--space-3);
   max-height: 260px;
   overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .mini-list button,
@@ -1827,7 +1847,7 @@ td small {
 .movement-row,
 .movement-empty {
   display: grid;
-  grid-template-columns: 100px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(76px, 100px) minmax(0, 1fr) auto;
   gap: var(--space-3);
   align-items: center;
   padding: 10px 12px;
@@ -1897,6 +1917,7 @@ td small {
   display: grid;
   place-items: start center;
   padding: 12vh var(--space-4) var(--space-4);
+  padding-top: 12dvh;
   background: var(--overlay);
   animation: modalFadeIn .14s ease-out;
 }
@@ -1991,6 +2012,7 @@ td small {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
+  flex-wrap: wrap;
   padding: 10px var(--space-4);
   border-top: 1px solid var(--line);
   color: var(--muted);
@@ -2016,6 +2038,7 @@ td small {
   padding: var(--space-5);
   background: var(--overlay);
   animation: modalFadeIn .16s ease-out;
+  overscroll-behavior: contain;
 }
 
 .image-lightbox-overlay {
@@ -2026,6 +2049,7 @@ td small {
 .product-modal {
   width: min(920px, 100%);
   max-height: min(88vh, 840px);
+  max-height: min(88dvh, 840px);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
@@ -2043,6 +2067,7 @@ td small {
 .action-form-modal {
   width: min(680px, calc(100vw - 40px));
   max-height: min(84vh, 720px);
+  max-height: min(84dvh, 720px);
 }
 
 .action-form-modal:has(.transaction-form-grid) {
@@ -2076,6 +2101,7 @@ td small {
 .product-modal-body {
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: var(--space-6);
   background: var(--surface);
 }
@@ -2128,6 +2154,7 @@ td small {
 .transaction-detail-modal {
   width: min(760px, 100%);
   max-height: min(86vh, 760px);
+  max-height: min(86dvh, 760px);
   overflow: auto;
 }
 
@@ -2145,6 +2172,7 @@ td small {
   position: relative;
   width: min(920px, 100%);
   max-height: min(88vh, 900px);
+  max-height: min(88dvh, 900px);
   display: grid;
   place-items: center;
   gap: var(--space-3);
@@ -2160,6 +2188,7 @@ td small {
   max-width: 100%;
   height: auto;
   max-height: calc(88vh - 112px);
+  max-height: calc(88dvh - 112px);
   border-radius: var(--radius-lg);
   object-fit: contain;
 }
@@ -2363,6 +2392,7 @@ td small {
   main {
     height: auto;
     min-height: 100vh;
+    min-height: 100dvh;
     overflow: visible;
   }
 
@@ -2397,7 +2427,9 @@ td small {
     display: flex;
     gap: var(--space-1);
     overflow-x: auto;
+    overscroll-behavior-x: contain;
     padding: var(--space-2);
+    scroll-snap-type: x proximity;
   }
 
   .sidebar .section-label {
@@ -2405,8 +2437,10 @@ td small {
   }
 
   .side-link {
+    flex: 0 0 auto;
     min-width: 136px;
     grid-template-columns: 22px minmax(0, 1fr);
+    scroll-snap-align: start;
   }
 
   .side-link.active::before {
@@ -2470,6 +2504,7 @@ td small {
 
   .toolbar {
     display: grid;
+    grid-template-columns: 1fr;
   }
 
   .toolbar input,
@@ -2496,6 +2531,7 @@ td small {
 
   .product-modal {
     max-height: calc(100vh - 16px);
+    max-height: calc(100dvh - 16px);
     border-radius: var(--radius-lg);
   }
 
@@ -2525,5 +2561,40 @@ td small {
   .toast-stack {
     right: var(--space-3);
     top: var(--space-3);
+  }
+}
+
+@media (max-width: 520px) {
+  .brand small,
+  .command-trigger kbd,
+  .user-menu-copy {
+    display: none;
+  }
+
+  .product-command-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .compact-search {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .compact-search .btn.primary {
+    grid-column: 1 / -1;
+  }
+
+  .screen-header h1,
+  .manager-head h2,
+  .product-command h2 {
+    font-size: 22px;
+  }
+
+  .movement-row,
+  .movement-empty {
+    grid-template-columns: 1fr auto;
+  }
+
+  .movement-row em {
+    grid-column: 1 / -1;
   }
 }
