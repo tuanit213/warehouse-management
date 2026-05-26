@@ -1,4 +1,4 @@
-services:
+﻿services:
   frontend:
     build:
       context: ./frontend
@@ -8,7 +8,14 @@ services:
     ports:
       - "3006:3000"
     depends_on:
-      - api-gateway
+      api-gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks:
       - wms-network
 
@@ -20,6 +27,7 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: 3000
       JWT_SECRET: ${JWT_SECRET:-change-me-super-secret}
+      INTERNAL_GATEWAY_TOKEN: ${INTERNAL_GATEWAY_TOKEN:-local-dev-internal-gateway-token}
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672
     ports:
@@ -28,7 +36,23 @@ services:
       rabbitmq:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+      inventory-service:
+        condition: service_healthy
+      transaction-service:
+        condition: service_healthy
+      report-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/api/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks:
       - wms-network
 
@@ -40,6 +64,7 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: 3001
       JWT_SECRET: ${JWT_SECRET:-change-me-super-secret}
+      INTERNAL_GATEWAY_TOKEN: ${INTERNAL_GATEWAY_TOKEN:-local-dev-internal-gateway-token}
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@wms.local}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-Password@123}
       BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-Demo Admin}
@@ -52,9 +77,15 @@ services:
       rabbitmq:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       auth-service-db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks:
       - wms-network
 
@@ -86,6 +117,7 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: 3002
       JWT_SECRET: ${JWT_SECRET:-change-me-super-secret}
+      INTERNAL_GATEWAY_TOKEN: ${INTERNAL_GATEWAY_TOKEN:-local-dev-internal-gateway-token}
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@product-service-db:5432/${PRODUCT_DB:-product_db}
@@ -95,9 +127,15 @@ services:
       rabbitmq:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       product-service-db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3002/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks:
       - wms-network
 
@@ -129,6 +167,7 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: 3003
       JWT_SECRET: ${JWT_SECRET:-change-me-super-secret}
+      INTERNAL_GATEWAY_TOKEN: ${INTERNAL_GATEWAY_TOKEN:-local-dev-internal-gateway-token}
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672
       TRANSACTION_OUTBOX_EXCHANGE: ${TRANSACTION_OUTBOX_EXCHANGE:-wms.transaction.events}
@@ -141,9 +180,15 @@ services:
       rabbitmq:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       inventory-service-db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3003/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks:
       - wms-network
 
@@ -175,12 +220,15 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: 3004
       JWT_SECRET: ${JWT_SECRET:-change-me-super-secret}
+      INTERNAL_GATEWAY_TOKEN: ${INTERNAL_GATEWAY_TOKEN:-local-dev-internal-gateway-token}
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672
       TRANSACTION_OUTBOX_PUBLISHER_ENABLED: ${TRANSACTION_OUTBOX_PUBLISHER_ENABLED:-true}
       TRANSACTION_OUTBOX_EXCHANGE: ${TRANSACTION_OUTBOX_EXCHANGE:-wms.transaction.events}
       TRANSACTION_OUTBOX_DEAD_EXCHANGE: ${TRANSACTION_OUTBOX_DEAD_EXCHANGE:-wms.transaction.events.dead}
       TRANSACTION_OUTBOX_DEAD_QUEUE: ${TRANSACTION_OUTBOX_DEAD_QUEUE:-wms.transaction.events.dead}
+      INVENTORY_API_URL: ${INVENTORY_API_URL:-http://inventory-service:3003/api}
+      PRODUCT_API_URL: ${PRODUCT_API_URL:-http://product-service:3002/api}
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@transaction-service-db:5432/${TRANSACTION_DB:-transaction_db}
     ports:
       - "3004:3004"
@@ -188,9 +236,15 @@ services:
       rabbitmq:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       transaction-service-db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3004/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks:
       - wms-network
 
@@ -222,6 +276,7 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: 3005
       JWT_SECRET: ${JWT_SECRET:-change-me-super-secret}
+      INTERNAL_GATEWAY_TOKEN: ${INTERNAL_GATEWAY_TOKEN:-local-dev-internal-gateway-token}
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@report-service-db:5432/${REPORT_DB:-report_db}
@@ -231,9 +286,15 @@ services:
       rabbitmq:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       report-service-db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3005/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks:
       - wms-network
 
@@ -262,6 +323,11 @@ services:
     container_name: wms-redis
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - wms-network
 

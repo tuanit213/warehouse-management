@@ -16,7 +16,7 @@ function corsOptions() {
 
 function requireGatewayToken(req: any, res: any, next: () => void) {
   if (process.env.NODE_ENV !== 'production') return next();
-  if (req.path === '/api/health' || req.path === '/api/health/ready') return next();
+  if (req.path === '/api/health' || req.path === '/api/health/ready' || req.path === '/api/metrics') return next();
   const expected = process.env.INTERNAL_GATEWAY_TOKEN;
   if (!expected) return res.status(500).json({ message: 'INTERNAL_GATEWAY_TOKEN is not configured' });
   if (req.headers['x-internal-gateway-token'] !== expected) return res.status(403).json({ message: 'Internal gateway token required' });

@@ -1,12 +1,12 @@
 'use client';
 
 import { KeyRound, LogOut, Moon, Sun } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { MouseEvent, useEffect, useRef, useState } from 'react';
 
 type UserMenuProps = {
   user: { email: string; fullName?: string; role: string };
   theme: 'light' | 'dark';
-  onToggleTheme: () => void;
+  onToggleTheme: (event?: MouseEvent<HTMLElement>) => void;
   onChangePassword: () => void;
   onLogout: () => void;
 };
@@ -58,6 +58,17 @@ export function UserMenu({ user, theme, onToggleTheme, onChangePassword, onLogou
       </button>
       {open && (
         <section className="user-menu-panel" role="menu" aria-label="Tài khoản">
+          <div className={theme === 'dark' ? 'theme-gif-preview night' : 'theme-gif-preview day'} aria-hidden="true">
+            <span className="theme-gif-sky">
+              <span className="theme-gif-orb" />
+              <span className="theme-gif-cloud one" />
+              <span className="theme-gif-cloud two" />
+              <span className="theme-gif-star one" />
+              <span className="theme-gif-star two" />
+              <span className="theme-gif-star three" />
+            </span>
+            <span className="theme-gif-caption">{theme === 'dark' ? 'Night mode' : 'Day mode'}</span>
+          </div>
           <div className="user-menu-profile">
             <span className="user-avatar large">{initials(user)}</span>
             <div>
@@ -66,7 +77,7 @@ export function UserMenu({ user, theme, onToggleTheme, onChangePassword, onLogou
               <small>{user.role}</small>
             </div>
           </div>
-          <button className="user-menu-item" type="button" role="menuitem" onClick={onToggleTheme}>
+          <button className="user-menu-item theme-menu-item" type="button" role="menuitem" onClick={onToggleTheme}>
             {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
             <span>{theme === 'dark' ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'}</span>
             <span className={theme === 'dark' ? 'switch mini is-on' : 'switch mini'} aria-hidden="true"><span /></span>

@@ -2,7 +2,7 @@ services:
   frontend:
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3000/api}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
     ports:
       - "${FRONTEND_PORT:-3006}:3000"
     healthcheck:
@@ -35,11 +35,11 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       INTERNAL_GATEWAY_TOKEN: ${INTERNAL_GATEWAY_TOKEN:?INTERNAL_GATEWAY_TOKEN is required}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
-      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@wms.local}
-      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:?BOOTSTRAP_ADMIN_EMAIL is required}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?BOOTSTRAP_ADMIN_PASSWORD is required}
       BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-Production Admin}
       CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN is required}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@auth-service-db:5432/${AUTH_DB:-auth_db}
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@auth-service-db:5432/${AUTH_DB:-auth_db}
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:?RABBITMQ_DEFAULT_USER is required}:${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS is required}@rabbitmq:5672
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
@@ -57,11 +57,11 @@ services:
       CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN is required}
       PRODUCT_UPLOAD_DIR: ${PRODUCT_UPLOAD_DIR:-/app/uploads/products}
       PRODUCT_IMAGE_MAX_BYTES: ${PRODUCT_IMAGE_MAX_BYTES:-2097152}
-      PRODUCT_PUBLIC_BASE_URL: ${PRODUCT_PUBLIC_BASE_URL:-http://localhost:3000/api}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@product-service-db:5432/${PRODUCT_DB:-product_db}
+      PRODUCT_PUBLIC_BASE_URL: ${PRODUCT_PUBLIC_BASE_URL:?PRODUCT_PUBLIC_BASE_URL is required}
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@product-service-db:5432/${PRODUCT_DB:-product_db}
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:?RABBITMQ_DEFAULT_USER is required}:${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS is required}@rabbitmq:5672
     volumes:
-      - product-upload-data:/app/uploads/products
+      - product-upload-data:${PRODUCT_UPLOAD_DIR:-/app/uploads/products}
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3002/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 30s
@@ -76,7 +76,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       INTERNAL_GATEWAY_TOKEN: ${INTERNAL_GATEWAY_TOKEN:?INTERNAL_GATEWAY_TOKEN is required}
       CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN is required}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@inventory-service-db:5432/${INVENTORY_DB:-inventory_db}
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@inventory-service-db:5432/${INVENTORY_DB:-inventory_db}
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:?RABBITMQ_DEFAULT_USER is required}:${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS is required}@rabbitmq:5672
       TRANSACTION_OUTBOX_EXCHANGE: ${TRANSACTION_OUTBOX_EXCHANGE:-wms.transaction.events}
       INVENTORY_TRANSACTION_CONSUMER_ENABLED: ${INVENTORY_TRANSACTION_CONSUMER_ENABLED:-true}
@@ -98,7 +98,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       INTERNAL_GATEWAY_TOKEN: ${INTERNAL_GATEWAY_TOKEN:?INTERNAL_GATEWAY_TOKEN is required}
       CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN is required}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@transaction-service-db:5432/${TRANSACTION_DB:-transaction_db}
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@transaction-service-db:5432/${TRANSACTION_DB:-transaction_db}
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:?RABBITMQ_DEFAULT_USER is required}:${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS is required}@rabbitmq:5672
       TRANSACTION_OUTBOX_PUBLISHER_ENABLED: ${TRANSACTION_OUTBOX_PUBLISHER_ENABLED:-true}
       TRANSACTION_OUTBOX_EXCHANGE: ${TRANSACTION_OUTBOX_EXCHANGE:-wms.transaction.events}
@@ -108,6 +108,8 @@ services:
       TRANSACTION_OUTBOX_BATCH_SIZE: ${TRANSACTION_OUTBOX_BATCH_SIZE:-25}
       TRANSACTION_OUTBOX_MAX_ATTEMPTS: ${TRANSACTION_OUTBOX_MAX_ATTEMPTS:-10}
       TRANSACTION_OUTBOX_STALE_MINUTES: ${TRANSACTION_OUTBOX_STALE_MINUTES:-5}
+      INVENTORY_API_URL: ${INVENTORY_API_URL:-http://inventory-service:3003/api}
+      PRODUCT_API_URL: ${PRODUCT_API_URL:-http://product-service:3002/api}
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3004/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 30s
@@ -122,7 +124,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       INTERNAL_GATEWAY_TOKEN: ${INTERNAL_GATEWAY_TOKEN:?INTERNAL_GATEWAY_TOKEN is required}
       CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN is required}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@report-service-db:5432/${REPORT_DB:-report_db}
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@report-service-db:5432/${REPORT_DB:-report_db}
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:?RABBITMQ_DEFAULT_USER is required}:${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS is required}@rabbitmq:5672
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3005/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
@@ -134,7 +136,7 @@ services:
     restart: unless-stopped
     ports: !reset []
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${AUTH_DB:-auth_db}
 
@@ -142,7 +144,7 @@ services:
     restart: unless-stopped
     ports: !reset []
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${PRODUCT_DB:-product_db}
 
@@ -150,7 +152,7 @@ services:
     restart: unless-stopped
     ports: !reset []
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${INVENTORY_DB:-inventory_db}
 
@@ -158,7 +160,7 @@ services:
     restart: unless-stopped
     ports: !reset []
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${TRANSACTION_DB:-transaction_db}
 
@@ -166,7 +168,7 @@ services:
     restart: unless-stopped
     ports: !reset []
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${REPORT_DB:-report_db}
 

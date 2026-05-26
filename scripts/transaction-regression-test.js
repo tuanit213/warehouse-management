@@ -113,6 +113,30 @@ function failConfirm(transaction) {
     assert.match(source, /process\.env\.INTERNAL_GATEWAY_TOKEN/);
   });
 
+  await test('Transaction PDF renderer keeps professional HTML and Vietnamese text', () => {
+    const serviceSource = fs.readFileSync(path.join(root, 'services/transaction-service/src/transaction.service.ts'), 'utf8');
+    const rendererSource = fs.readFileSync(path.join(root, 'services/transaction-service/src/transaction-pdf.renderer.ts'), 'utf8');
+    const mojibakePattern = /[\u00c3\u00c2\u00c4\u00c6\u00c5]|\u00e1[\u00ba\u00bb]/;
+    assert.doesNotMatch(serviceSource, mojibakePattern);
+    assert.doesNotMatch(rendererSource, mojibakePattern);
+    assert.match(serviceSource, /renderTransactionPdf/);
+    assert.doesNotMatch(serviceSource, /simplePdf|pdfText/);
+    assert.match(serviceSource, /pdfFile\(id: string, expectedType\?: TransactionType\)/);
+    assert.match(serviceSource, /buildPdfData\(id, expectedType\)/);
+    assert.match(serviceSource, /transaction\.type !== expectedType/);
+    assert.match(serviceSource, /throw new NotFoundException/);
+    assert.match(serviceSource, /Phiếu nhập kho/);
+    assert.match(serviceSource, /Mã phiếu xuất/);
+    assert.match(fs.readFileSync(path.join(root, 'services/transaction-service/src/app.controller.ts'), 'utf8'), /pdfFile\(id, 'INBOUND'\)/);
+    assert.match(fs.readFileSync(path.join(root, 'services/transaction-service/src/app.controller.ts'), 'utf8'), /pdfFile\(id, 'OUTBOUND'\)/);
+    assert.match(rendererSource, /buildTransactionPdfHtml/);
+    assert.match(rendererSource, /escapeHtml/);
+    assert.match(rendererSource, /A4 portrait/);
+    assert.match(rendererSource, /Người lập phiếu/);
+    assert.match(rendererSource, /Bảng hàng hóa/);
+    assert.match(rendererSource, /font-family: Arial, "DejaVu Sans", "Liberation Sans", sans-serif/);
+  });
+
   await test('Outbound reservation lifecycle is released on cancel and consumed on confirm', () => {
     const source = fs.readFileSync(path.join(root, 'services/transaction-service/src/transaction.service.ts'), 'utf8');
     assert.match(source, /releaseInventoryReservations/);

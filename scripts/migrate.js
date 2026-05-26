@@ -194,7 +194,14 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(`[MIGRATION FAILED] ${error.message}`);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(`[MIGRATION FAILED] ${error.message}`);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  preflightChecks,
+  services,
+};

@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { requireDedicatedCredentialsForRemote } = require('./lib/env-safety');
 
 function loadEnvFile(file) {
   if (!fs.existsSync(file)) return;
@@ -12,12 +13,20 @@ function loadEnvFile(file) {
   }
 }
 
-loadEnvFile(path.resolve(__dirname, '..', '.env.production'));
+if (process.env.WMS_SKIP_ENV_FILE !== 'true') loadEnvFile(path.resolve(__dirname, '..', '.env.production'));
 
 const API = process.env.API_URL || 'http://localhost:3000/api';
 const FRONTEND = process.env.FRONTEND_URL || 'http://localhost:3006';
-const email = process.env.DEMO_ADMIN_EMAIL || process.env.BOOTSTRAP_ADMIN_EMAIL || 'admin@wms.local';
-const password = process.env.DEMO_ADMIN_PASSWORD || process.env.BOOTSTRAP_ADMIN_PASSWORD || process.env.POSTGRES_PASSWORD || 'Password@123';
+const adminAccessToken = process.env.SMOKE_ADMIN_ACCESS_TOKEN || process.env.WMS_ADMIN_ACCESS_TOKEN;
+const email = process.env.SMOKE_ADMIN_EMAIL || process.env.DEMO_ADMIN_EMAIL || process.env.BOOTSTRAP_ADMIN_EMAIL || 'admin@wms.local';
+const password = process.env.SMOKE_ADMIN_PASSWORD || process.env.DEMO_ADMIN_PASSWORD || process.env.BOOTSTRAP_ADMIN_PASSWORD || 'Password@123';
+
+requireDedicatedCredentialsForRemote({
+  apiUrl: API,
+  purpose: 'Smoke test',
+  tokenKeys: ['SMOKE_ADMIN_ACCESS_TOKEN', 'WMS_ADMIN_ACCESS_TOKEN'],
+  credentialPairs: [['SMOKE_ADMIN_EMAIL', 'SMOKE_ADMIN_PASSWORD']],
+});
 
 async function assertOk(name, fn) {
   try {
@@ -71,13 +80,25 @@ async function upsertSmokeStock(headers, payload) {
   }
 }
 
+async function adminHeaders() {
+  if (adminAccessToken) {
+    await assertOk('Admin access token supplied', () => request(`${API}/auth/me`, { headers: { authorization: `Bearer ${adminAccessToken}` } }));
+    return { authorization: `Bearer ${adminAccessToken}` };
+  }
+  try {
+    const login = await assertOk('Demo admin login', () => request(`${API}/auth/login`, { method: 'POST', body: JSON.stringify({ email, password }) }));
+    const refreshed = await assertOk('Auth refresh token rotation', () => request(`${API}/auth/refresh`, { method: 'POST', body: JSON.stringify({ refreshToken: login.refreshToken }) }));
+    return { authorization: `Bearer ${refreshed.accessToken}` };
+  } catch (error) {
+    throw new Error('Admin authentication failed. Set SMOKE_ADMIN_EMAIL/SMOKE_ADMIN_PASSWORD or SMOKE_ADMIN_ACCESS_TOKEN for this environment.');
+  }
+}
+
 (async () => {
   await assertOk('Frontend responds', () => request(FRONTEND));
   await assertOk('API Gateway health', () => request(`${API}/health`));
   await assertOk('API Gateway readiness', () => request(`${API}/health/ready`));
-  const login = await assertOk('Demo admin login', () => request(`${API}/auth/login`, { method: 'POST', body: JSON.stringify({ email, password }) }));
-  const refreshed = await assertOk('Auth refresh token rotation', () => request(`${API}/auth/refresh`, { method: 'POST', body: JSON.stringify({ refreshToken: login.refreshToken }) }));
-  const headers = { authorization: `Bearer ${refreshed.accessToken}` };
+  const headers = await adminHeaders();
 
   await assertOk('Auth /me via Gateway', () => request(`${API}/auth/me`, { headers }));
   await assertOk('Product list via Gateway + PostgreSQL', () => request(`${API}/products?page=1&limit=5`, { headers }));
@@ -113,13 +134,21 @@ async function upsertSmokeStock(headers, payload) {
     const pdf = await requestBuffer(`${API}/inbounds/${inbound.id}/pdf`, { headers });
     if (!pdf.contentType.includes('application/pdf')) throw new Error(`Unexpected PDF content type: ${pdf.contentType}`);
     if (pdf.buffer.subarray(0, 5).toString() !== '%PDF-') throw new Error('Inbound PDF is not a valid PDF response');
-    if (pdf.buffer.length < 1000) throw new Error('Inbound PDF response is unexpectedly small');
+    if (pdf.buffer.length < 10_000) throw new Error('Inbound PDF response is unexpectedly small');
+  });
+  await assertOk('Invalid voucher PDF id returns 400', async () => {
+    const res = await fetch(`${API}/outbounds/not-a-uuid/pdf`, { headers });
+    if (res.status !== 400) throw new Error(`Expected 400 for invalid PDF id, got ${res.status}`);
   });
   const inboundQuantity = stockAtLocation(await request(`${API}/stock-levels?warehouseId=${warehouse.id}&productId=${product.id}`, { headers }));
   if (inboundQuantity < beforeQuantity + 10) throw new Error('Inbound did not increase stock at smoke location');
 
   const outbound = await assertOk('Create outbound draft', () => request(`${API}/outbounds`, { method: 'POST', headers, body: JSON.stringify({ warehouseId: warehouse.id, note: 'Smoke outbound', items: [{ productId: product.id, locationId: location.id, quantity: 2, unitPrice: 1000 }] }) }));
   await assertOk('Confirm outbound', () => request(`${API}/outbounds/${outbound.id}/confirm`, { method: 'POST', headers }));
+  await assertOk('Mismatched voucher PDF route returns 404', async () => {
+    const res = await fetch(`${API}/inbounds/${outbound.id}/pdf`, { headers });
+    if (res.status !== 404) throw new Error(`Expected 404 for mismatched PDF route, got ${res.status}`);
+  });
   await assertOk('Reject duplicate confirm', async () => {
     try { await request(`${API}/outbounds/${outbound.id}/confirm`, { method: 'POST', headers }); } catch (error) { if (error.message.startsWith('409')) return true; throw error; }
     throw new Error('Duplicate confirm unexpectedly succeeded');

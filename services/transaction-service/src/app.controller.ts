@@ -47,10 +47,10 @@ export class AppController {
 
   @Get('inbounds/:id/pdf')
   async inboundPdf(@Param('id') id: string, @Res() res: any) {
-    const pdf = await this.transactions.pdf(id);
+    const pdf = await this.transactions.pdfFile(id, 'INBOUND');
     res.setHeader('content-type', 'application/pdf');
-    res.setHeader('content-disposition', `inline; filename="inbound-${id}.pdf"`);
-    return res.send(pdf);
+    res.setHeader('content-disposition', `inline; filename="inbound-${this.safeFileName(pdf.code)}.pdf"`);
+    return res.send(pdf.buffer);
   }
 
   @Post('outbounds')
@@ -64,9 +64,13 @@ export class AppController {
 
   @Get('outbounds/:id/pdf')
   async outboundPdf(@Param('id') id: string, @Res() res: any) {
-    const pdf = await this.transactions.pdf(id);
+    const pdf = await this.transactions.pdfFile(id, 'OUTBOUND');
     res.setHeader('content-type', 'application/pdf');
-    res.setHeader('content-disposition', `inline; filename="outbound-${id}.pdf"`);
-    return res.send(pdf);
+    res.setHeader('content-disposition', `inline; filename="outbound-${this.safeFileName(pdf.code)}.pdf"`);
+    return res.send(pdf.buffer);
+  }
+
+  private safeFileName(value: string) {
+    return String(value || 'voucher').replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 80) || 'voucher';
   }
 }

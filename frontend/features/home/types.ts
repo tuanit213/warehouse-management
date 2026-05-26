@@ -20,6 +20,7 @@ export type StockForm = { productId: string; warehouseId: string; locationId: st
 export type TransferForm = { productId: string; fromWarehouseId: string; fromLocationId: string; toWarehouseId: string; toLocationId: string; quantity: string; reason: string };
 export type SupplierForm = { code: string; name: string; contactName: string; phone: string; email: string; address: string };
 export type PasswordForm = { oldPassword: string; newPassword: string };
+export type UserForm = { email: string; fullName: string; password: string; role: 'ADMIN' | 'MANAGER' | 'WAREHOUSE_STAFF' };
 export type TransactionForm = { supplierId: string; productId: string; warehouseId: string; locationId: string; quantity: string; unitPrice: string; note: string };
 export type TransactionLineForm = { productId: string; locationId: string; quantity: number; unitPrice: number };
 export type ReportDashboard = { totalProducts: number; totalWarehouses: number; totalStock: number; lowStockCount: number; inboundCount: number; outboundCount: number; totalTransactions: number; totalInventoryValue: number; generatedAt: string };

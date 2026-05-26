@@ -1,8 +1,15 @@
-﻿node_modules
+node_modules
 dist
 .next
 coverage
+.env
+.env.*
+*.log
 npm-debug.log*
+.DS_Store
+.vscode
+.idea
+backups
+tmp-ui-check
 Dockerfile
 .dockerignore
-

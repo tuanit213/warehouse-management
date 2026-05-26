@@ -22,7 +22,10 @@
     "test:transaction-idempotency": "node scripts/transaction-idempotency-test.js",
     "test:migration-idempotency": "node scripts/migration-idempotency-test.js",
     "test:critical": "npm run test:auth-critical && npm run test:inventory-concurrency && npm run test:transaction-idempotency && npm run test:migration-idempotency",
-    "test:quality": "node scripts/static-quality-check.js",
+    "test:prod-env": "node scripts/production-env-validation-test.js",
+    "test:prod-migrate-preflight": "node scripts/production-migration-preflight-test.js",
+    "test:prod-backup-restore": "node scripts/production-backup-restore-validation-test.js",
+    "test:quality": "node scripts/static-quality-check.js && node scripts/production-readiness-audit.js && npm run test:prod-env && npm run test:prod-migrate-preflight && npm run test:prod-backup-restore",
     "test:regression": "npm run test:quality && npm run test:api-contract && npm run test:e2e && npm run test:rbac && npm run test:auth && npm run test:inventory && npm run test:transactions && npm run test:migrations",
     "migrate": "node scripts/migrate.js",
     "migrate:dry-run": "node scripts/migrate.js --dry-run",
@@ -34,21 +37,24 @@
     "migrate:preflight:auth": "node scripts/migrate.js --preflight --service auth",
     "migrate:preflight:inventory": "node scripts/migrate.js --preflight --service inventory",
     "migrate:preflight:transaction": "node scripts/migrate.js --preflight --service transaction",
+    "prod:migrate:preflight": "node scripts/production-migration-preflight.js",
     "prod:env:check": "node scripts/validate-production-env.js",
-    "prod:config": "docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.prod.yml config",
-    "observability:config": "docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.observability.yml --profile observability config",
-    "prod:backup": "powershell -ExecutionPolicy Bypass -File scripts/backup-production.ps1",
-    "prod:restore": "powershell -ExecutionPolicy Bypass -File scripts/restore-production.ps1",
+    "security:audit": "node scripts/security-audit-check.js",
+    "prod:config": "docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.prod.yml config --quiet",
+    "prod:proxy:config": "docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.proxy.yml --profile proxy config --quiet",
+    "prod:deploy": "node scripts/run-powershell.js scripts/deploy-production.ps1",
+    "prod:deploy:dry-run": "node scripts/run-powershell.js scripts/deploy-production.ps1 -DryRun",
+    "prod:verify": "node scripts/run-powershell.js scripts/verify-production.ps1",
+    "prod:readiness:audit": "node scripts/production-readiness-audit.js",
+    "prod:logs:check": "node scripts/production-log-check.js",
+    "observability:config": "docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.observability.yml --profile observability config --quiet",
+    "observability:check": "node scripts/observability-check.js",
+    "prod:backup": "node scripts/run-powershell.js scripts/backup-production.ps1",
+    "prod:restore": "node scripts/run-powershell.js scripts/restore-production.ps1",
     "demo:ready": "npm run compose:up && npm run seed:demo && npm run smoke:test"
   },
   "workspaces": [
     "frontend",
     "services/*"
-  ],
-  "overrides": {
-    "postcss": "8.5.10",
-    "next": {
-      "postcss": "8.5.10"
-    }
-  }
+  ]
 }

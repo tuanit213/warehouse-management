@@ -1,18 +1,24 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Pool } from 'pg';
 import { PG_POOL } from './database';
 import { CreateGenericTransactionDto, CreateSupplierDto, CreateTransactionDto, UpdateSupplierDto } from './dto';
+import { closeTransactionPdfBrowser, renderTransactionPdf, TransactionPdfData } from './transaction-pdf.renderer';
 
 type TransactionType = 'INBOUND' | 'OUTBOUND';
 
 @Injectable()
-export class TransactionService implements OnModuleInit {
+export class TransactionService implements OnModuleInit, OnModuleDestroy {
   constructor(@Inject(PG_POOL) private readonly db: Pool) {}
 
   private inventoryUrl = process.env.INVENTORY_API_URL || 'http://inventory-service:3003/api';
+  private productUrl = process.env.PRODUCT_API_URL || 'http://product-service:3002/api';
 
   async onModuleInit() {
     await this.ensureSchema();
+  }
+
+  async onModuleDestroy() {
+    await closeTransactionPdfBrowser();
   }
 
   private async ensureSchema() {
@@ -223,6 +229,7 @@ export class TransactionService implements OnModuleInit {
   }
 
   async getTransaction(id: string) {
+    if (!this.isUuid(id)) throw new BadRequestException('Invalid transaction id');
     const transaction = await this.db.query('SELECT * FROM stock_transactions WHERE id=$1', [id]);
     if (!transaction.rowCount) throw new NotFoundException('Transaction not found');
     const items = await this.db.query('SELECT * FROM stock_transaction_items WHERE transaction_id=$1 ORDER BY id ASC', [id]);
@@ -391,89 +398,150 @@ export class TransactionService implements OnModuleInit {
   }
 
   async pdf(id: string) {
+    return (await this.pdfFile(id)).buffer;
+  }
+
+  async pdfFile(id: string, expectedType?: TransactionType) {
+    const data = await this.buildPdfData(id, expectedType);
+    return {
+      buffer: await renderTransactionPdf(data),
+      code: data.transaction.code,
+      type: data.transaction.type,
+    };
+  }
+
+  private async buildPdfData(id: string, expectedType?: TransactionType): Promise<TransactionPdfData> {
     const transaction = await this.getTransaction(id);
-    const supplier = transaction.supplierId ? await this.db.query('SELECT code, name, contact_name, phone, email, address FROM suppliers WHERE id=$1', [transaction.supplierId]) : null;
-    const lines = [
-      'WAREHOUSE MANAGEMENT SYSTEM',
-      `${transaction.type} VOUCHER`,
-      '',
-      `Voucher: ${transaction.code}`,
-      `Status: ${transaction.status}`,
-      `Created at: ${this.formatDate(transaction.createdAt)}`,
-      `Confirmed at: ${this.formatDate(transaction.confirmedAt)}`,
-      `Warehouse ID: ${transaction.warehouseId}`,
-      `Supplier: ${supplier?.rows[0] ? `${supplier.rows[0].code} - ${supplier.rows[0].name}` : transaction.supplierId || '-'}`,
-      `Note: ${transaction.note || '-'}`,
-      '',
-      'ITEMS',
-      'No.  Product ID                            Location ID                           Qty        Unit price      Amount',
-      ...transaction.items.map((item, index) => {
+    if (expectedType && transaction.type !== expectedType) {
+      throw new NotFoundException(`${expectedType === 'INBOUND' ? 'Inbound' : 'Outbound'} transaction not found`);
+    }
+    const [supplier, warehouse, locationMap, productMap] = await Promise.all([
+      this.getSupplierForPdf(transaction.supplierId),
+      this.getWarehouseForPdf(transaction.warehouseId),
+      this.getLocationsForPdf(transaction.warehouseId),
+      this.getProductsForPdf(transaction.items.map((item) => item.productId)),
+    ]);
+
+    return {
+      title: transaction.type === 'INBOUND' ? 'Phiếu nhập kho' : 'Phiếu xuất kho',
+      voucherLabel: transaction.type === 'INBOUND' ? 'Mã phiếu nhập' : 'Mã phiếu xuất',
+      transaction: {
+        id: transaction.id,
+        code: transaction.code,
+        type: transaction.type,
+        status: transaction.status,
+        note: transaction.note,
+        createdAt: transaction.createdAt,
+        confirmedAt: transaction.confirmedAt,
+        totalQuantity: transaction.totalQuantity,
+        totalValue: transaction.totalValue,
+      },
+      warehouse,
+      supplier,
+      items: transaction.items.map((item, index) => {
+        const product = productMap.get(item.productId);
+        const locationCode = item.locationId ? locationMap.get(item.locationId)?.code || item.locationId : '-';
         const amount = Number(item.quantity || 0) * Number(item.unitPrice || 0);
-        return [
-          String(index + 1).padEnd(4),
-          String(item.productId).padEnd(37),
-          String(item.locationId || '-').padEnd(37),
-          this.money(item.quantity).padStart(8),
-          this.money(item.unitPrice).padStart(15),
-          this.money(amount).padStart(12),
-        ].join(' ');
+        return {
+          index: index + 1,
+          productId: item.productId,
+          sku: product?.sku || item.productId,
+          productName: product?.name || item.productId,
+          unit: product?.unit || '-',
+          locationId: item.locationId,
+          locationCode,
+          quantity: Number(item.quantity || 0),
+          unitPrice: Number(item.unitPrice || 0),
+          amount,
+        };
       }),
-      '',
-      `Total quantity: ${this.money(transaction.totalQuantity)}`,
-      `Total value: ${this.money(transaction.totalValue)}`,
-      '',
-      'Prepared by                         Checked by                          Approved by',
-      '',
-      '',
-      '____________________                ____________________                ____________________',
-    ];
-    return this.simplePdf(lines);
+      printedAt: new Date().toISOString(),
+    };
   }
 
-  private formatDate(value?: string | null) {
-    if (!value) return '-';
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? '-' : date.toISOString().replace('T', ' ').slice(0, 19);
+  private async getSupplierForPdf(supplierId?: string | null): Promise<TransactionPdfData['supplier']> {
+    if (!supplierId) return null;
+    const result = await this.db.query('SELECT id, code, name, contact_name, phone, email, address FROM suppliers WHERE id=$1', [supplierId]);
+    if (!result.rowCount) return { id: supplierId };
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      code: row.code,
+      name: row.name,
+      contactName: row.contact_name,
+      phone: row.phone,
+      email: row.email,
+      address: row.address,
+    };
   }
 
-  private money(value: number | string) {
-    return Number(value || 0).toLocaleString('vi-VN');
+  private async getWarehouseForPdf(warehouseId: string): Promise<TransactionPdfData['warehouse']> {
+    try {
+      const warehouses = this.asArray(await this.fetchInternalJson(this.inventoryUrl, '/warehouses'));
+      const warehouse = warehouses.find((item) => item?.id === warehouseId);
+      if (warehouse) {
+        return {
+          id: warehouse.id,
+          code: warehouse.code,
+          name: warehouse.name,
+          address: warehouse.address,
+        };
+      }
+    } catch (error) {
+      this.log('warn', 'pdf_warehouse_enrich_failed', { warehouseId, message: this.sanitizeError(error) });
+    }
+    return { id: warehouseId };
   }
 
-  private simplePdf(lines: string[]) {
-    const content = [
-      'BT',
-      '/F1 10 Tf',
-      '50 790 Td',
-      ...lines.flatMap((line, index) => [`(${this.pdfText(line)}) Tj`, index === lines.length - 1 ? '' : '0 -14 Td']).filter(Boolean),
-      'ET',
-    ].join('\n');
-    const objects = [
-      '1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj',
-      '2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj',
-      '3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 842 595] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>endobj',
-      '4 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj',
-      `5 0 obj<< /Length ${Buffer.byteLength(content)} >>stream\n${content}\nendstream\nendobj`,
-    ];
-    let offset = `%PDF-1.4\n`.length;
-    const xref = ['xref', `0 ${objects.length + 1}`, '0000000000 65535 f '];
-    const body = objects.map((object) => {
-      xref.push(`${String(offset).padStart(10, '0')} 00000 n `);
-      offset += Buffer.byteLength(object + '\n');
-      return object;
-    }).join('\n') + '\n';
-    const xrefOffset = Buffer.byteLength(`%PDF-1.4\n${body}`);
-    return Buffer.from(`%PDF-1.4\n${body}${xref.join('\n')}\ntrailer<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
+  private async getLocationsForPdf(warehouseId: string): Promise<Map<string, { code?: string }>> {
+    const map = new Map<string, { code?: string }>();
+    try {
+      const locations = this.asArray(await this.fetchInternalJson(this.inventoryUrl, `/locations?warehouseId=${encodeURIComponent(warehouseId)}`));
+      for (const location of locations) {
+        if (location?.id) map.set(location.id, { code: location.code });
+      }
+    } catch (error) {
+      this.log('warn', 'pdf_locations_enrich_failed', { warehouseId, message: this.sanitizeError(error) });
+    }
+    return map;
   }
 
-  private pdfText(value: string) {
-    return value
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^\x20-\x7E]/g, '')
-      .replace(/\\/g, '\\\\')
-      .replace(/\(/g, '\\(')
-      .replace(/\)/g, '\\)');
+  private async getProductsForPdf(productIds: string[]): Promise<Map<string, { sku?: string; name?: string; unit?: string }>> {
+    const ids = Array.from(new Set(productIds.filter(Boolean)));
+    const map = new Map<string, { sku?: string; name?: string; unit?: string }>();
+    await Promise.all(ids.map(async (productId) => {
+      const product = await this.getProductForPdf(productId);
+      map.set(productId, product || { sku: productId, name: productId, unit: '-' });
+    }));
+    return map;
+  }
+
+  private async getProductForPdf(productId: string): Promise<{ sku?: string; name?: string; unit?: string } | null> {
+    try {
+      const product = await this.fetchInternalJson(this.productUrl, `/products/${encodeURIComponent(productId)}`);
+      if (product?.id === productId) return { sku: product.sku, name: product.name, unit: product.unit };
+    } catch {
+      // Fall back to the list endpoint below for compatibility with product services that do not expose GET by id.
+    }
+    try {
+      const products = this.asArray(await this.fetchInternalJson(this.productUrl, '/products?limit=100'));
+      const product = products.find((item) => item?.id === productId);
+      if (product) return { sku: product.sku, name: product.name, unit: product.unit };
+    } catch (error) {
+      this.log('warn', 'pdf_product_enrich_failed', { productId, message: this.sanitizeError(error) });
+    }
+    return null;
+  }
+
+  private asArray(payload: any): any[] {
+    if (Array.isArray(payload)) return payload;
+    if (Array.isArray(payload?.items)) return payload.items;
+    if (Array.isArray(payload?.data)) return payload.data;
+    return [];
+  }
+
+  private isUuid(value: string) {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
   }
 
   private sanitizeError(error: unknown) {
@@ -503,6 +571,19 @@ export class TransactionService implements OnModuleInit {
     const text = await response.text();
     const data = text ? JSON.parse(text) : null;
     if (!response.ok) throw new ConflictException(data?.message || `Inventory sync failed: ${response.status}`);
+    return data;
+  }
+
+  private async fetchInternalJson(baseUrl: string, path: string) {
+    const response = await fetch(`${baseUrl}${path}`, {
+      headers: {
+        ...(process.env.INTERNAL_GATEWAY_TOKEN ? { 'x-internal-gateway-token': process.env.INTERNAL_GATEWAY_TOKEN } : {}),
+      },
+      signal: AbortSignal.timeout(Number(process.env.PDF_ENRICH_TIMEOUT_MS || 2500)),
+    });
+    const text = await response.text();
+    const data = text ? JSON.parse(text) : null;
+    if (!response.ok) throw new Error(data?.message || `Internal API failed: ${response.status}`);
     return data;
   }
 

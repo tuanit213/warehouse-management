@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { requireExplicitRemoteMutationFlag } = require('./lib/env-safety');
 
 function loadEnvFile(file) {
   if (!fs.existsSync(file)) return;
@@ -12,15 +13,21 @@ function loadEnvFile(file) {
   }
 }
 
-loadEnvFile(path.resolve(__dirname, '..', '.env.production'));
+if (process.env.WMS_SKIP_ENV_FILE !== 'true') loadEnvFile(path.resolve(__dirname, '..', '.env.production'));
 
 const API = process.env.API_URL || 'http://localhost:3000/api';
+const adminPasswordFromEnv = Boolean(process.env.DEMO_ADMIN_PASSWORD || process.env.BOOTSTRAP_ADMIN_PASSWORD);
 const admin = {
   email: process.env.DEMO_ADMIN_EMAIL || process.env.BOOTSTRAP_ADMIN_EMAIL || 'admin@wms.local',
-  password: process.env.DEMO_ADMIN_PASSWORD || process.env.BOOTSTRAP_ADMIN_PASSWORD || process.env.POSTGRES_PASSWORD || 'Password@123',
+  password: process.env.DEMO_ADMIN_PASSWORD || process.env.BOOTSTRAP_ADMIN_PASSWORD || 'Password@123',
   fullName: 'Demo Admin',
-  role: 'ADMIN',
 };
+
+requireExplicitRemoteMutationFlag({
+  apiUrl: API,
+  flagName: 'ALLOW_DEMO_SEED_REMOTE',
+  purpose: 'Demo data seeding',
+});
 
 async function request(path, options = {}) {
   const res = await fetch(API + path, {
@@ -42,13 +49,19 @@ async function main() {
   console.log(`Seeding demo data via ${API}`);
   let auth;
   try {
-    auth = await request('/auth/register', { method: 'POST', body: JSON.stringify(admin) });
-    console.log(`Created admin: ${admin.email}`);
-  } catch (error) {
-    const message = JSON.stringify(error.data || '');
-    if (!message.includes('Email already exists')) throw error;
     auth = await request('/auth/login', { method: 'POST', body: JSON.stringify({ email: admin.email, password: admin.password }) });
-    console.log(`Admin already exists, logged in: ${admin.email}`);
+    console.log(`Admin logged in: ${admin.email}`);
+  } catch (error) {
+    try {
+      auth = await request('/auth/register', { method: 'POST', body: JSON.stringify(admin) });
+      console.log(`Created demo user: ${admin.email}`);
+    } catch {
+      throw error;
+    }
+  }
+
+  if (auth.user?.role !== 'ADMIN') {
+    throw new Error('Demo seed requires an ADMIN account. Start the stack with BOOTSTRAP_ADMIN_EMAIL/BOOTSTRAP_ADMIN_PASSWORD or set DEMO_ADMIN_* to an existing admin.');
   }
 
   const token = auth.accessToken;
@@ -88,8 +101,8 @@ async function main() {
     const found = warehouses.find((item) => item.code === warehouse.code);
     return found || request('/warehouses', { method: 'POST', headers, body: JSON.stringify(warehouse) });
   };
-  const hcm = await getOrCreateWarehouse({ code: 'WH-HCM', name: 'Kho Hồ Chí Minh', address: 'Khu công nghiệp Tân Bình, TP.HCM' });
-  const hn = await getOrCreateWarehouse({ code: 'WH-HN', name: 'Kho Hà Nội', address: 'Khu công nghiệp Thăng Long, Hà Nội' });
+  const hcm = await getOrCreateWarehouse({ code: 'DEMO-WH-HCM', name: 'Kho Hồ Chí Minh', address: 'Khu công nghiệp Tân Bình, TP.HCM' });
+  const hn = await getOrCreateWarehouse({ code: 'DEMO-WH-HN', name: 'Kho Hà Nội', address: 'Khu công nghiệp Thăng Long, Hà Nội' });
 
   const getOrCreateLocation = async (warehouseId, location) => {
     const locations = await request(`/warehouses/${warehouseId}/locations`, { headers });
@@ -126,7 +139,7 @@ async function main() {
   console.log(`Inventory OK. Warehouses: ${warehouses.length}, stock levels: ${stockLevels.length}`);
   console.log('\nDemo account:');
   console.log(`  email: ${admin.email}`);
-  console.log(`  password: ${admin.password}`);
+  console.log(`  password: ${adminPasswordFromEnv ? '[redacted: loaded from environment]' : admin.password}`);
   console.log('\nURLs:');
   console.log('  Frontend: http://localhost:3006');
   console.log('  API Gateway: http://localhost:3000/api/health');

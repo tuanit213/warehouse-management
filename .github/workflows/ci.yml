@@ -23,7 +23,13 @@ jobs:
         run: npm ci --workspaces --include-workspace-root
 
       - name: Validate Docker Compose
-        run: docker compose config
+        run: docker compose config --quiet
+
+      - name: Verify PowerShell for production scripts
+        run: pwsh --version
+
+      - name: Security audit
+        run: npm run security:audit
 
       - name: Static quality
         run: npm run test:quality
@@ -63,6 +69,26 @@ jobs:
           done
           docker compose logs --tail=200
           exit 1
+
+      - name: Production migration preflight smoke
+        run: |
+          umask 077
+          trap 'rm -f .env.ci-preflight' EXIT
+          cat > .env.ci-preflight <<'EOF'
+          NODE_ENV=production
+          JWT_SECRET=ci-jwt-secret-for-compose-preflight-12345
+          INTERNAL_GATEWAY_TOKEN=ci-internal-token-for-compose-preflight-12345
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=postgres
+          RABBITMQ_DEFAULT_USER=guest
+          RABBITMQ_DEFAULT_PASS=guest
+          CORS_ORIGIN=http://localhost:3000
+          NEXT_PUBLIC_API_URL=http://localhost:3000/api
+          PRODUCT_PUBLIC_BASE_URL=http://localhost:3000/api
+          BOOTSTRAP_ADMIN_EMAIL=admin@wms.local
+          BOOTSTRAP_ADMIN_PASSWORD=ci-bootstrap-password-12345
+          EOF
+          npm run prod:migrate:preflight -- --env-file .env.ci-preflight
 
       - name: Smoke test
         run: npm run smoke:test

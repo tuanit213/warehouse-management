@@ -1,8 +1,9 @@
 'use client';
 
 import Image from 'next/image';
-import { ArrowDownToLine, ArrowUpFromLine, BarChart3, Boxes, ClipboardList, KeyRound, LayoutDashboard, MapPin, Package, Plus, Search, Tags, Truck, Users, Warehouse as WarehouseIcon, X } from 'lucide-react';
-import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDownToLine, ArrowUpFromLine, BarChart3, Boxes, ClipboardList, KeyRound, LayoutDashboard, MapPin, Package, Plus, Search, Tags, Truck, UserPlus, Users, Warehouse as WarehouseIcon, X } from 'lucide-react';
+import { FormEvent, MouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { CommandPalette } from '../../components/ui/CommandPalette';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { FocusTrap } from '../../components/ui/FocusTrap';
@@ -12,7 +13,7 @@ import { UserMenu } from '../../components/ui/UserMenu';
 import { API_URL, ApiError, authHeaders, parseResponse } from '../../lib/api';
 import { downloadAuthorizedFile } from '../../lib/download';
 import { formatCurrency, parseCurrency } from './format';
-import type { AuthResponse, Category, CategoryForm, ConfirmDialog, CurrencyInputProps, FormModalKey, InoutChartPoint, InventoryValue, Location, LocationForm, LowStockReport, PasswordForm, Product, ProductForm, ProductFormProps, ProductResponse, ReportDashboard, StockAlert, StockForm, StockLevel, StockMovement, Supplier, SupplierForm, Toast, Transaction, TransactionForm, TransactionLineForm, TransferForm, UploadProductImageResponse, User, ViewKey, Warehouse, WarehouseForm } from './types';
+import type { AuthResponse, Category, CategoryForm, ConfirmDialog, CurrencyInputProps, FormModalKey, InoutChartPoint, InventoryValue, Location, LocationForm, LowStockReport, PasswordForm, Product, ProductForm, ProductFormProps, ProductResponse, ReportDashboard, StockAlert, StockForm, StockLevel, StockMovement, Supplier, SupplierForm, Toast, Transaction, TransactionForm, TransactionLineForm, TransferForm, UploadProductImageResponse, User, UserForm, ViewKey, Warehouse, WarehouseForm } from './types';
 
 const TOKEN_KEY = 'wms_access_token';
 const THEME_KEY = 'wms_theme';
@@ -26,6 +27,7 @@ const emptyTransferForm: TransferForm = { productId: '', fromWarehouseId: '', fr
 const emptySupplierForm: SupplierForm = { code: '', name: '', contactName: '', phone: '', email: '', address: '' };
 const emptyTransactionForm: TransactionForm = { supplierId: '', productId: '', warehouseId: '', locationId: '', quantity: '1', unitPrice: '0', note: '' };
 const emptyPasswordForm: PasswordForm = { oldPassword: '', newPassword: '' };
+const emptyUserForm: UserForm = { email: '', fullName: '', password: '', role: 'WAREHOUSE_STAFF' };
 function freshProductForm(): ProductForm {
   return { ...emptyProductForm, barcode: '', color: '', size: '', salePrice: '0', warehouseId: '', locationId: '', quantityImported: '0', supplierId: '', importedAt: new Date().toISOString().slice(0, 10), note: '', imageUrl: '' };
 }
@@ -137,6 +139,7 @@ export default function HomeClient() {
   const [categoryForm, setCategoryForm] = useState<CategoryForm>(emptyCategoryForm);
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [users, setUsers] = useState<User[]>([]);
+  const [userForm, setUserForm] = useState<UserForm>(emptyUserForm);
   const [passwordForm, setPasswordForm] = useState<PasswordForm>(emptyPasswordForm);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -210,7 +213,32 @@ export default function HomeClient() {
   useEffect(() => { const onKeyDown = (event: KeyboardEvent) => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); if (token) setCommandOpen(true); } }; window.addEventListener('keydown', onKeyDown); return () => window.removeEventListener('keydown', onKeyDown); }, [token]);
   useEffect(() => { if (!productModalOpen && !activeFormModal && !imagePreview && !commandOpen) return; const previousOverflow = document.body.style.overflow; document.body.style.overflow = 'hidden'; const onKeyDown = (event: KeyboardEvent) => { if (event.key !== 'Escape') return; if (imagePreview) setImagePreview(null); else if (activeFormModal) setActiveFormModal(null); }; window.addEventListener('keydown', onKeyDown); return () => { document.body.style.overflow = previousOverflow; window.removeEventListener('keydown', onKeyDown); }; }, [productModalOpen, activeFormModal, imagePreview, commandOpen]);
   useEffect(() => { if (!token || activeView !== 'products') return; const nextKeyword = searchInput.trim(); if (nextKeyword === keyword.trim()) return; const timeout = window.setTimeout(() => loadProducts(token, 1, nextKeyword), 320); return () => window.clearTimeout(timeout); }, [searchInput, keyword, token, activeView]);
-  function toggleTheme() { const nextTheme = theme === 'dark' ? 'light' : 'dark'; setTheme(nextTheme); localStorage.setItem(THEME_KEY, nextTheme); }
+  function toggleTheme(event?: MouseEvent<HTMLElement>) {
+    const nextTheme = theme === 'dark' ? 'light' : 'dark';
+    const clickedElement = event?.currentTarget;
+    const prefersReducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+    if (clickedElement) {
+      const rect = clickedElement.getBoundingClientRect();
+      document.documentElement.style.setProperty('--theme-transition-x', `${rect.left + rect.width / 2}px`);
+      document.documentElement.style.setProperty('--theme-transition-y', `${rect.top + rect.height / 2}px`);
+    }
+
+    const applyTheme = () => {
+      setTheme(nextTheme);
+      localStorage.setItem(THEME_KEY, nextTheme);
+    };
+
+    const startViewTransition = (document as Document & { startViewTransition?: (callback: () => void) => void }).startViewTransition;
+    if (!startViewTransition || prefersReducedMotion) {
+      applyTheme();
+      return;
+    }
+
+    startViewTransition.call(document, () => {
+      flushSync(applyTheme);
+    });
+  }
   function headers(accessToken = token) { return authHeaders(accessToken); }
   function pushToast(type: Toast['type'], message: string) { const id = Date.now(); setToasts((items) => [...items.slice(-2), { id, type, message }]); window.setTimeout(() => setToasts((items) => items.filter((item) => item.id !== id)), 4200); }
   function askConfirm(dialog: ConfirmDialog) { setConfirmDialog(dialog); }
@@ -262,6 +290,34 @@ export default function HomeClient() {
   async function submitCategory(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setSaving(true); try { await parseResponse<Category>(await fetch(`${API_URL}/categories${editingCategoryId ? `/${editingCategoryId}` : ''}`, { method: editingCategoryId ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json', ...headers() }, body: JSON.stringify({ name: categoryForm.name.trim(), parentId: categoryForm.parentId || undefined }) })); setCategoryForm(emptyCategoryForm); setEditingCategoryId(null); setActiveFormModal(null); await loadProducts(token, page, keyword); } catch (e) { handleApiError(e, 'Không lưu được nhóm hàng'); } finally { setSaving(false); } }
   async function deleteCategory(category: Category) { askConfirm({ title: 'Xóa nhóm hàng?', message: `Nhóm ${category.name} sẽ bị xóa nếu chưa có sản phẩm sử dụng.`, actionLabel: 'Xóa nhóm', danger: true, onConfirm: async () => { setSaving(true); try { await parseResponse(await fetch(`${API_URL}/categories/${category.id}`, { method: 'DELETE', headers: headers() })); await loadProducts(token, page, keyword); } catch (e) { handleApiError(e, 'Không xóa được nhóm hàng'); } finally { setSaving(false); } } }); }
   async function loadUsers(accessToken = token) { if (user?.role !== 'ADMIN') return; setLoading(true); try { setUsers(await parseResponse<User[]>(await fetch(`${API_URL}/auth/users`, { headers: headers(accessToken) }))); } catch (e) { handleApiError(e, 'Không tải được người dùng'); } finally { setLoading(false); } }
+  async function submitUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      const created = await parseResponse<AuthResponse>(await fetch(`${API_URL}/auth/register`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: userForm.email.trim(), fullName: userForm.fullName.trim(), password: userForm.password }),
+      }));
+      const createdUserId = created.user.id;
+      if (userForm.role !== 'WAREHOUSE_STAFF') {
+        if (!createdUserId) throw new Error('Không nhận được ID tài khoản mới để gán vai trò.');
+        await parseResponse<User>(await fetch(`${API_URL}/auth/users/${createdUserId}/role`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json', ...headers() },
+          body: JSON.stringify({ role: userForm.role }),
+        }));
+      }
+      setUserForm(emptyUserForm);
+      pushToast('success', `Đã tạo tài khoản ${created.user.email}.`);
+      await loadUsers();
+    } catch (e) {
+      handleApiError(e, 'Không tạo được người dùng');
+    } finally {
+      setSaving(false);
+    }
+  }
   async function changeUserRole(target: User, role: string) { if (!target.id) return; setSaving(true); try { await parseResponse<User>(await fetch(`${API_URL}/auth/users/${target.id}/role`, { method: 'PATCH', headers: { 'content-type': 'application/json', ...headers() }, body: JSON.stringify({ role }) })); await loadUsers(); } catch (e) { handleApiError(e, 'Không đổi được vai trò'); } finally { setSaving(false); } }
   async function changeUserStatus(target: User, status: 'ACTIVE' | 'DISABLED') { if (!target.id) return; setSaving(true); try { await parseResponse<User>(await fetch(`${API_URL}/auth/users/${target.id}/status`, { method: 'PATCH', headers: { 'content-type': 'application/json', ...headers() }, body: JSON.stringify({ status }) })); await loadUsers(); pushToast('success', status === 'ACTIVE' ? 'Đã kích hoạt tài khoản.' : 'Đã vô hiệu hóa tài khoản.'); } catch (e) { handleApiError(e, 'Không đổi được trạng thái người dùng'); } finally { setSaving(false); } }
   async function submitPassword(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setSaving(true); try { await parseResponse(await fetch(`${API_URL}/auth/change-password`, { method: 'PATCH', headers: { 'content-type': 'application/json', ...headers() }, body: JSON.stringify(passwordForm) })); setPasswordForm(emptyPasswordForm); setActiveFormModal(null); pushToast('success', 'Đã đổi mật khẩu. Vui lòng đăng nhập lại.'); logout('Đã đổi mật khẩu, vui lòng đăng nhập lại.'); } catch (e) { handleApiError(e, 'Không đổi được mật khẩu'); } finally { setSaving(false); } }
@@ -326,7 +382,22 @@ export default function HomeClient() {
       setReportLoading(false);
     }
   }
-  async function downloadTransactionPdf(transaction: Transaction) { setTransactionLoading(true); setTransactionError(''); try { await downloadAuthorizedFile(`${API_URL}${transaction.type === 'INBOUND' ? `/inbounds/${transaction.id}/pdf` : `/outbounds/${transaction.id}/pdf`}`, token, `${transaction.code || transaction.id}.pdf`); } catch (e) { if (!handleApiError(e, 'Không tải được PDF')) setTransactionError(e instanceof Error ? e.message : 'Không tải được PDF'); } finally { setTransactionLoading(false); } }
+  async function downloadTransactionPdf(transaction: Transaction) {
+    setTransactionLoading(true);
+    setTransactionError('');
+    try {
+      if (!transaction?.id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(transaction.id)) {
+        throw new Error('Mã giao dịch không hợp lệ, không thể tải PDF');
+      }
+      const path = transaction.type === 'INBOUND' ? 'inbounds' : 'outbounds';
+      const safeFileName = `${transaction.code || transaction.id}`.replace(/[^a-z0-9._-]+/gi, '-');
+      await downloadAuthorizedFile(`${API_URL}/${path}/${encodeURIComponent(transaction.id)}/pdf`, token, `${safeFileName}.pdf`);
+    } catch (e) {
+      if (!handleApiError(e, 'Không tải được PDF')) setTransactionError(e instanceof Error ? e.message : 'Không tải được PDF');
+    } finally {
+      setTransactionLoading(false);
+    }
+  }
 
   if (!token || !user) return <main className="login-shell" data-theme={theme}><form className="login-form" onSubmit={login}><span className="brand"><span className="brand-mark">t</span><strong>tuanit WMS</strong></span><h1>Đăng nhập quản lý kho</h1><p>{checkingSession ? 'Đang kiểm tra phiên...' : status}</p>{error && <p className="api-error">Lỗi: {error}</p>}<label>Email<input required type="email" autoComplete="username" value={loginForm.email} onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })} placeholder="admin@wms.local" /></label><label>Mật khẩu<input required type="password" autoComplete="current-password" value={loginForm.password} onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })} placeholder="Nhập mật khẩu" /></label><button className="btn cta" disabled={loading || checkingSession}>{loading || checkingSession ? 'Đang xử lý...' : 'Đăng nhập'}</button></form></main>;
 
@@ -358,7 +429,7 @@ export default function HomeClient() {
 
   {activeView === 'categories' && <section id="categories" className="manager-section"><div className="manager-head"><div><p className="section-label">Nhóm hàng</p><h2>Quản lý nhóm hàng</h2>{error && <p className="api-error">Lỗi: {error}</p>}</div><ActionButton label="+ Thêm nhóm hàng" onClick={() => { setEditingCategoryId(null); setCategoryForm(emptyCategoryForm); setActiveFormModal('category'); }} /></div><article className="card"><h3>Danh sách nhóm hàng</h3><div className="mini-list">{categories.map((category) => <button key={category.id} type="button" onClick={() => { setEditingCategoryId(category.id); setCategoryForm({ name: category.name, parentId: category.parentId || '' }); setActiveFormModal('category'); }}><strong>{category.name}</strong><span>{products.filter((product) => product.categoryId === category.id).length} sản phẩm</span></button>)}{!categories.length && <span>Chưa có nhóm hàng.</span>}</div></article><ActionModal open={activeFormModal === 'category'} title={editingCategoryId ? 'Sửa nhóm hàng' : 'Thêm nhóm hàng'} label="Nhóm hàng" formId="category-modal-form" submitLabel={editingCategoryId ? 'Lưu thay đổi' : 'Lưu nhóm hàng'} saving={saving} onClose={() => setActiveFormModal(null)}><form id="category-modal-form" className="stack-form modal-product-form" onSubmit={submitCategory}><input required value={categoryForm.name} onChange={(e) => setCategoryForm({ ...categoryForm, name: e.target.value })} placeholder="Tên nhóm hàng" /><select value={categoryForm.parentId} onChange={(e) => setCategoryForm({ ...categoryForm, parentId: e.target.value })}><option value="">Không có nhóm cha</option>{categories.filter((category) => category.id !== editingCategoryId).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select>{editingCategoryId && <button className="btn danger full" type="button" onClick={() => { const category = categories.find((item) => item.id === editingCategoryId); if (category) deleteCategory(category); }}>Xóa nhóm hàng</button>}</form></ActionModal></section>}
 
-  {activeView === 'users' && <section id="users" className="manager-section"><div className="manager-head"><div><p className="section-label">Người dùng</p><h2>Quản trị người dùng</h2>{error && <p className="api-error">Lỗi: {error}</p>}</div><button className="btn primary" type="button" onClick={() => loadUsers()}>{loading ? 'Đang tải...' : 'Tải lại người dùng'}</button></div><article className="card"><h3>Tài khoản hệ thống</h3><div className="table-wrap"><table><thead><tr><th>Email</th><th>Họ tên</th><th>Vai trò</th><th>Trạng thái</th><th>Ngày tạo</th></tr></thead><tbody>{users.map((item) => { const isCurrentUser = item.id === user.id; const status = item.status || 'ACTIVE'; return <tr key={item.id || item.email}><td><strong>{item.email}</strong></td><td>{item.fullName || '-'}</td><td><select aria-label={`Đổi vai trò ${item.email}`} value={item.role} disabled={saving || isCurrentUser} onChange={(e) => changeUserRole(item, e.target.value)}><option value="ADMIN">ADMIN</option><option value="MANAGER">MANAGER</option><option value="WAREHOUSE_STAFF">WAREHOUSE_STAFF</option></select></td><td><button type="button" className={status === 'ACTIVE' ? 'status-pill success' : 'status-pill danger'} disabled={saving || isCurrentUser} aria-label={`${status === 'ACTIVE' ? 'Vô hiệu hóa' : 'Kích hoạt'} ${item.email}`} onClick={() => changeUserStatus(item, status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE')}>{status === 'ACTIVE' ? 'Đang hoạt động' : 'Đã vô hiệu hóa'}</button></td><td>{item.createdAt ? new Date(item.createdAt).toLocaleString('vi-VN') : '-'}</td></tr>; })}</tbody></table>{!users.length && <p className="empty-state">Chưa tải danh sách người dùng.</p>}</div></article></section>}
+  {activeView === 'users' && <section id="users" className="manager-section"><div className="manager-head"><div><p className="section-label">Người dùng</p><h2>Quản trị người dùng</h2>{error && <p className="api-error">Lỗi: {error}</p>}</div><button className="btn primary" type="button" onClick={() => loadUsers()}>{loading ? 'Đang tải...' : 'Tải lại người dùng'}</button></div><div className="section-grid"><article className="card"><h3>Thêm người dùng</h3><p>Tạo tài khoản mới và gán vai trò truy cập kho.</p><form className="stack-form modal-product-form user-create-form" onSubmit={submitUser}><label className="field-label">Email<input required type="email" autoComplete="off" value={userForm.email} onChange={(e) => setUserForm({ ...userForm, email: e.target.value })} placeholder="user@wms.local" /></label><label className="field-label">Họ tên<input required value={userForm.fullName} onChange={(e) => setUserForm({ ...userForm, fullName: e.target.value })} placeholder="Tên người dùng" /></label><label className="field-label">Mật khẩu<input required type="password" minLength={8} autoComplete="new-password" value={userForm.password} onChange={(e) => setUserForm({ ...userForm, password: e.target.value })} placeholder="Tối thiểu 8 ký tự" /></label><label className="field-label">Vai trò<select value={userForm.role} onChange={(e) => setUserForm({ ...userForm, role: e.target.value as UserForm['role'] })}><option value="WAREHOUSE_STAFF">WAREHOUSE_STAFF</option><option value="MANAGER">MANAGER</option><option value="ADMIN">ADMIN</option></select></label><button className="btn primary full" type="submit" disabled={saving}><UserPlus size={16} />{saving ? 'Đang tạo...' : 'Thêm người dùng'}</button></form></article><article className="card"><h3>Tài khoản hệ thống</h3><div className="table-wrap"><table><thead><tr><th>Email</th><th>Họ tên</th><th>Vai trò</th><th>Trạng thái</th><th>Ngày tạo</th></tr></thead><tbody>{users.map((item) => { const isCurrentUser = item.id === user.id; const status = item.status || 'ACTIVE'; return <tr key={item.id || item.email}><td><strong>{item.email}</strong></td><td>{item.fullName || '-'}</td><td><select aria-label={`Đổi vai trò ${item.email}`} value={item.role} disabled={saving || isCurrentUser} onChange={(e) => changeUserRole(item, e.target.value)}><option value="ADMIN">ADMIN</option><option value="MANAGER">MANAGER</option><option value="WAREHOUSE_STAFF">WAREHOUSE_STAFF</option></select></td><td><button type="button" className={status === 'ACTIVE' ? 'status-pill success' : 'status-pill danger'} disabled={saving || isCurrentUser} aria-label={`${status === 'ACTIVE' ? 'Vô hiệu hóa' : 'Kích hoạt'} ${item.email}`} onClick={() => changeUserStatus(item, status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE')}>{status === 'ACTIVE' ? 'Đang hoạt động' : 'Đã vô hiệu hóa'}</button></td><td>{item.createdAt ? new Date(item.createdAt).toLocaleString('vi-VN') : '-'}</td></tr>; })}</tbody></table>{!users.length && <p className="empty-state">Chưa tải danh sách người dùng.</p>}</div></article></div></section>}
 
   {activeView === 'warehouses' && <section id="warehouses" className="manager-section"><div className="manager-head"><div><p className="section-label">Kho & tồn kho</p><h2>Quản lý kho, vị trí và tồn</h2>{inventoryError && <p className="api-error">Lỗi: {inventoryError}</p>}</div><div className="manager-actions"><button className="btn ghost" onClick={() => loadInventory(token)}>{inventoryLoading ? 'Đang tải...' : 'Tải lại tồn kho'}</button><ActionButton label="+ Tạo kho" onClick={() => { setEditingWarehouseId(null); setWarehouseForm(emptyWarehouseForm); setActiveFormModal('warehouse'); }} /></div></div><article className="card warehouse-list-card"><div className="card-head"><div><h3>Danh sách kho</h3><p>Đang có {warehouses.length} kho trong hệ thống.</p></div></div><div className="table-wrap warehouse-table-wrap"><table className="dense-table"><thead><tr><th>Mã kho</th><th>Tên kho</th><th>Địa chỉ</th><th>Thao tác</th></tr></thead><tbody>{warehouses.map((w) => <tr key={w.id} className={selectedWarehouseId === w.id ? 'selected-row' : ''}><td><strong>{w.code}</strong></td><td>{w.name}</td><td>{w.address || 'Chưa có địa chỉ'}</td><td className="action-cell"><button type="button" onClick={() => { setSelectedWarehouseId(w.id); setWarehouseForm({ code: w.code, name: w.name, address: w.address || '' }); setEditingWarehouseId(w.id); loadInventory(token, w.id, stockProductFilter); setActiveFormModal('warehouse'); }}>Xem / sửa</button><button className="danger" type="button" disabled={inventoryLoading} onClick={() => deleteWarehouse(w)}>Xóa</button></td></tr>)}</tbody></table>{!warehouses.length && <p className="empty-state">Chưa có kho nào.</p>}</div></article><ActionModal open={activeFormModal === 'warehouse'} title={editingWarehouseId ? 'Sửa kho hàng' : 'Tạo kho hàng'} label="Kho hàng" formId="warehouse-modal-form" submitLabel={editingWarehouseId ? 'Lưu thay đổi' : 'Lưu kho'} saving={inventoryLoading} onClose={() => setActiveFormModal(null)}><form id="warehouse-modal-form" className="stack-form modal-product-form" onSubmit={submitWarehouse}><input required value={warehouseForm.code} onChange={(e) => setWarehouseForm({ ...warehouseForm, code: e.target.value })} placeholder="Mã kho" /><input required value={warehouseForm.name} onChange={(e) => setWarehouseForm({ ...warehouseForm, name: e.target.value })} placeholder="Tên kho" /><input value={warehouseForm.address} onChange={(e) => setWarehouseForm({ ...warehouseForm, address: e.target.value })} placeholder="Địa chỉ" /></form></ActionModal></section>}
 

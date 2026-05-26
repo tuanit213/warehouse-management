@@ -12,8 +12,11 @@
 2. Restore the latest backup created before migration:
 
 ```powershell
-npm run prod:restore
+npm run prod:restore -- -BackupPath .\backups\<pre-deploy-backup> -DryRun
+npm run prod:restore -- -BackupPath .\backups\<pre-deploy-backup> -ConfirmRestore
 ```
+
+The restore manifest `postgresUser` must match the target `POSTGRES_USER`; dry-run fails before destructive work if it does not.
 
 3. Run health checks and smoke tests after restore.
 

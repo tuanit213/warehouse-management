@@ -12,6 +12,14 @@ Run preflight against existing databases:
 npm run migrate:preflight
 ```
 
+For production Docker Compose deployments, use the Compose-aware preflight instead:
+
+```powershell
+npm run prod:migrate:preflight
+```
+
+`migrate:preflight` is for environments where service database URLs are available to the host process. `prod:migrate:preflight` runs the same read-only checks inside the running database containers and avoids putting database passwords in command-line URLs.
+
 Apply migrations by service:
 
 ```powershell

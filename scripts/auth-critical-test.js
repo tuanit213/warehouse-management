@@ -22,7 +22,7 @@ async function main() {
 
   const email = `critical-${Date.now()}@wms.local`;
   const password = `Password@${Date.now()}`;
-  const register = await json('/auth/register', { email, password, fullName: 'Critical Test', role: 'ADMIN' });
+  const register = await json('/auth/register', { email, password, fullName: 'Critical Test' });
   assert.equal(register.user.role, 'WAREHOUSE_STAFF');
   const login = await json('/auth/login', { email, password });
   assert.ok(login.accessToken);

@@ -40,9 +40,26 @@ Start it with production compose:
 docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.observability.yml --profile observability up -d prometheus grafana
 ```
 
+Then run the automated verification:
+
+```powershell
+npm run observability:check
+```
+
+The check validates Prometheus targets for every WMS service, Grafana health, Loki readiness, and recent WMS service log streams. Override URLs when checking a remote host or non-default ports:
+
+```powershell
+$env:PROMETHEUS_URL="http://localhost:9090"
+$env:GRAFANA_URL="http://localhost:3008"
+$env:LOKI_URL="http://localhost:3100"
+npm run observability:check
+```
+
 - Prometheus: `http://localhost:9090` by default.
 - Grafana: `http://localhost:3008` by default.
 - Required secret: `GRAFANA_ADMIN_PASSWORD` in `.env.production`.
+- Prometheus, Grafana, and Loki bind to `127.0.0.1` by default through `OBSERVABILITY_BIND_HOST`. Keep this for SSH tunnels or local server access.
+- To bind observability ports to all interfaces, set `OBSERVABILITY_BIND_HOST=0.0.0.0` and `OBSERVABILITY_EXPOSE_PUBLIC=true` only after adding firewall rules or reverse-proxy authentication.
 - Dashboard provisioning: `ops/grafana/dashboards/wms-overview.json`.
 - Prometheus scrape config: `ops/prometheus/prometheus.yml`.
 - Loki config: `ops/loki/local-config.yml` with 7 day retention.
